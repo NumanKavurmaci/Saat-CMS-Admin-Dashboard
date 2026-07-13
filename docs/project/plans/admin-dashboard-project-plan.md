@@ -1,8 +1,10 @@
 # SaatCMS Admin Dashboard Project Plan
 
-> Implementation detail: use the
+> **Planning record.** This document preserves product decisions and delivery
+> phases. For current setup and operational behavior, start with the
+> [documentation handbook](../../README.md). The
 > [low-level implementation plan](admin-dashboard-low-level-implementation-plan.md)
-> for task order, file boundaries, acceptance criteria, and Vitest coverage.
+> records detailed acceptance criteria and implementation status.
 
 ## Objective
 
@@ -11,10 +13,15 @@ Build a separate desktop-first Next.js admin dashboard for the SaatCMS backend. 
 The dashboard will be maintained in a new repository and deployed as a separate Render web service alongside the existing backend and PostgreSQL database.
 
 Implementation status (July 13, 2026): the application, automated quality
-gates, CI workflow, and Render Blueprint are implemented on the development
-branch. Creating the external Render service and running deployed smoke tests
+gates, CI workflow, and Render Blueprint are implemented and merged into
+`main`. Creating the external Render service and running deployed smoke tests
 remain explicit release actions; this document does not claim the dashboard is
 currently live.
+
+Visitor access was added after the original plan: a signed visitor session can
+use only Overview, Metadata Resolver, Playback Tester, and System. Content,
+Channel, and EPG management remain editor/admin-only. See
+[Security and access](../../security-and-access.md) for the current boundary.
 
 ## Product Direction
 
