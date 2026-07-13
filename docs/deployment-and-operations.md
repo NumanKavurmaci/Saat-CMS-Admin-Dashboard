@@ -30,7 +30,7 @@ The root `render.yaml` defines one Node web service:
 | Build command | `npm ci && npm run build` |
 | Start command | `npm run start` |
 | Health check | `/login` |
-| Node version | `22.13.0` |
+| Node version | `22.15.0` |
 | Backend origin | `https://backend-developer-take-home-assignment.onrender.com` |
 | Request timeout | `30000` ms |
 | CMS credentials | `CMS_API_KEYS`, entered in Render (`sync: false`) |

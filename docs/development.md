@@ -29,7 +29,7 @@ The project uses:
 
 ## Prerequisites
 
-- Node.js 22.13.0 or newer
+- Node.js 22.15.0 or newer
 - npm, using the version bundled with a supported Node.js release
 - Access to a SaatCMS backend
 - Editor or admin credentials only if you need to test CMS management flows
@@ -240,7 +240,7 @@ Add regression tests at the closest useful boundary. Important examples in the c
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`. It uses Node.js 22.13.0 and performs:
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`. It uses Node.js 22.15.0 and performs:
 
 1. `npm ci`
 2. `npm audit --omit=dev`

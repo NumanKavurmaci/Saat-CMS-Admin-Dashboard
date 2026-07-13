@@ -26,7 +26,7 @@ environment variables.
 
 ## Five-minute local setup
 
-Requirements: Node.js 22.13 or newer and npm.
+Requirements: Node.js 22.15 or newer and npm.
 
 ```powershell
 npm ci

@@ -24,7 +24,7 @@ This separates dashboard process failures from backend availability, authenticat
 
 **Symptom:** Installation warns or fails because the current Node.js version does not satisfy the project engine.
 
-**Likely cause:** Node.js is older than 22.13.0.
+**Likely cause:** Node.js is older than 22.15.0.
 
 **Fix:** Install a supported Node.js 22 release, verify `node --version`, and rerun `npm ci`. Use the lockfile; do not work around the engine by deleting `package-lock.json`.
 
@@ -288,7 +288,7 @@ This separates dashboard process failures from backend availability, authenticat
 
 **Likely cause:** Different Node version, a dirty local dependency tree, uncommitted generated/type files, lockfile drift, case-sensitive path differences, or only a subset of gates was run locally.
 
-**Fix:** Use Node 22.13.0, run a clean `npm ci`, then execute the full gate in CI order. Inspect the first failing job step. CI's environment values are safe placeholders and are expected only to satisfy build-time validation.
+**Fix:** Use Node 22.15.0, run a clean `npm ci`, then execute the full gate in CI order. Inspect the first failing job step. CI's environment values are safe placeholders and are expected only to satisfy build-time validation.
 
 ### `npm audit --omit=dev` fails
 
