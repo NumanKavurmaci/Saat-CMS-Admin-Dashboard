@@ -1,5 +1,9 @@
 # SaatCMS Admin Dashboard Project Plan
 
+> Implementation detail: use the
+> [low-level implementation plan](admin-dashboard-low-level-implementation-plan.md)
+> for task order, file boundaries, acceptance criteria, and Vitest coverage.
+
 ## Objective
 
 Build a separate desktop-first Next.js admin dashboard for the SaatCMS backend. The dashboard will provide a polished dark SaaS interface for managing content, live channels, and EPG schedules, while also exposing lightweight tools for testing metadata and playback endpoints.
