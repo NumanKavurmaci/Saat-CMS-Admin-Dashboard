@@ -90,4 +90,28 @@ describe("AppShell", () => {
 
     await waitFor(() => expect(navigationHarness.logout).toHaveBeenCalledOnce());
   });
+
+  it("shows only public navigation and visitor-safe account copy in visitor mode", () => {
+    render(
+      <AppShell actorId="visitor" role="visitor">
+        <h1>Public dashboard</h1>
+      </AppShell>,
+    );
+
+    expect(screen.getByText("Visitor")).toBeVisible();
+    expect(screen.getByText("public access")).toBeVisible();
+    expect(screen.getByText("Public visitor session")).toBeVisible();
+    expect(
+      screen.getByText("Public requests never include a CMS bearer credential."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeVisible();
+
+    expect(screen.queryByRole("link", { name: "Content" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Live Channels" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "EPG Schedule" })).not.toBeInTheDocument();
+
+    for (const name of ["Overview", "Metadata Resolver", "Playback Tester", "System"]) {
+      expect(screen.getByRole("link", { name })).toBeVisible();
+    }
+  });
 });
