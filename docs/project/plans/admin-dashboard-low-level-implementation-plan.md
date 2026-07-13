@@ -34,8 +34,10 @@ Status as of July 13, 2026:
   mutations/tester submissions.
 - State: URL query parameters, server data, and local component state; no global
   client-state library.
-- Authentication: only configured `editor` and `admin` accounts may sign in.
-- Roles: both roles see the same dashboard; SaatCMS enforces authorization.
+- Authentication: users may start a signed visitor session or sign in with a
+  configured `editor` or `admin` account.
+- Roles: editor/admin see the same CMS interface; visitors see only routes backed
+  by public endpoints. SaatCMS remains the account authorization authority.
 - Secrets: backend bearer credentials remain in server-only environment data.
 - EPG: chronological channel/day view with local-to-UTC conversion.
 - Playback: dedicated tester page.
@@ -49,9 +51,9 @@ Status as of July 13, 2026:
 Browser request
   -> root or protected App Router page
        -> requireDashboardSession()
-       -> actor lookup from CMS_API_KEYS
+       -> visitor session or actor lookup from CMS_API_KEYS
        -> saatCmsRequest(relativePath)
-            -> optional Authorization bearer header
+            -> account bearer for CMS requests, no bearer for public requests
             -> no-store fetch with timeout
             -> SaatCMS backend
 ```
@@ -71,9 +73,11 @@ Form
 Rules:
 
 - Do not introduce a generic `/api/proxy/*` route.
-- Every authenticated backend request resolves the current session again.
+- Every CMS backend request resolves the current account session again.
 - Public unauthenticated calls are restricted to `/`, `/health`, `/ready`, and
   `/api/v1/mw/*`.
+- Visitor requests are limited to that public allowlist and never include an
+  `Authorization` header.
 - API paths must be safe relative paths without traversal, backslashes, or
   protocol-relative forms.
 - API errors expose only status, error code, safe message, and request ID.
@@ -114,13 +118,15 @@ Implementation files:
 
 ## 5. Authentication and Session Contract
 
-Login behavior:
+Access behavior:
 
-1. Accept actor ID and secret in `app/login/login-form.tsx`.
-2. `app/login/actions.ts` compares the secret without early byte comparison.
-3. Return one generic invalid-credentials error.
-4. Create an eight-hour HMAC-SHA-256 signed session on success.
-5. Redirect to `/dashboard`.
+1. **Continue as visitor** creates an eight-hour signed visitor session without
+   selecting or exposing a CMS account.
+2. Account login accepts actor ID and secret in `app/login/login-form.tsx`.
+3. `app/login/actions.ts` compares account secrets without early byte
+   comparison and returns one generic invalid-credentials error.
+4. Either successful path creates an HMAC-SHA-256 signed session and redirects
+   to `/dashboard`.
 
 Cookie settings:
 
@@ -131,9 +137,15 @@ Cookie settings:
 - `Secure` in production
 - Absolute expiry eight hours after creation
 
-Session payload contains only `actorId` and `expiresAt`. Each session read also
-requires the actor to still exist in the current `CMS_API_KEYS` value. Logout
-deletes the cookie and redirects to `/login`.
+The discriminated session payload contains `kind` and `expiresAt`; account
+sessions also contain `actorId`, while visitor sessions contain no actor or CMS
+secret. Each account session read requires the actor to still exist in the
+current `CMS_API_KEYS` value. Logout (shown as **Sign in** for a visitor) deletes
+the cookie and redirects to `/login`.
+
+`app/(dashboard)/layout.tsx` accepts either signed session.
+`app/(dashboard)/(cms)/layout.tsx` additionally requires an account session;
+visitor access redirects to `/dashboard?notice=cms-account-required`.
 
 Implementation files:
 
@@ -142,6 +154,7 @@ Implementation files:
 - `app/login/login-form.tsx`
 - `app/login/actions.ts`
 - `app/(dashboard)/layout.tsx`
+- `app/(dashboard)/(cms)/layout.tsx`
 - `lib/accounts.ts`
 - `lib/session.ts`
 
@@ -171,8 +184,11 @@ type ApiErrorShape = {
 
 Required request behavior:
 
-- Attach the current actor secret as `Authorization: Bearer ...` unless the
-  request is explicitly public.
+- Attach the current actor secret as `Authorization: Bearer ...` only for CMS
+  requests from an account session.
+- Explicitly public requests never receive an `Authorization` header, including
+  when initiated by a visitor.
+- Reject visitor CMS requests before making an upstream fetch.
 - Add JSON headers only when a body exists.
 - Forward `If-Match` when supplied.
 - Capture `ETag` and `X-Request-Id`.
@@ -181,27 +197,30 @@ Required request behavior:
 
 ## 7. Route Contract
 
-| Route | Implementation |
-| --- | --- |
-| `/` | Redirect to `/dashboard` or `/login` based on session |
-| `/login` | Dashboard sign-in |
-| `/dashboard` | Health/readiness and CMS totals |
-| `/content` | Content filters, pagination, and table |
-| `/content/new` | Content create form |
-| `/content/[id]` | Content edit/delete and metadata comparison |
-| `/channels` | Channel filters, pagination, and cards |
-| `/channels/new` | Channel create form |
-| `/channels/[channelId]` | Channel edit/delete and EPG link |
-| `/epg` | Channel selector |
-| `/channels/[channelId]/epg` | Day-window schedule |
-| `/channels/[channelId]/epg/new` | EPG create form |
-| `/channels/[channelId]/epg/[programId]/edit` | EPG edit form |
-| `/tools/metadata` | Metadata resolution form |
-| `/tools/playback` | Playback authorization form |
-| `/system` | Backend origin, liveness, and readiness |
+| Route | Access | Implementation |
+| --- | --- | --- |
+| `/` | Public entry | Redirect to `/dashboard` or `/login` based on session |
+| `/login` | Public entry | Account sign-in or visitor-session start |
+| `/dashboard` | Visitor/account | Public health/readiness; CMS totals for accounts only |
+| `/content` | Account only | Content filters, pagination, and table |
+| `/content/new` | Account only | Content create form |
+| `/content/[id]` | Account only | Content edit/delete and metadata comparison |
+| `/channels` | Account only | Channel filters, pagination, and cards |
+| `/channels/new` | Account only | Channel create form |
+| `/channels/[channelId]` | Account only | Channel edit/delete and EPG link |
+| `/epg` | Account only | Channel selector |
+| `/channels/[channelId]/epg` | Account only | Day-window schedule |
+| `/channels/[channelId]/epg/new` | Account only | EPG create form |
+| `/channels/[channelId]/epg/[programId]/edit` | Account only | EPG edit form |
+| `/tools/metadata` | Visitor/account | Public metadata resolution form |
+| `/tools/playback` | Visitor/account | Public playback authorization form |
+| `/system` | Visitor/account | Public backend origin, liveness, and readiness |
 
-All routes except `/login` and the root redirect are protected by
-`app/(dashboard)/layout.tsx`.
+All dashboard routes require a signed session through
+`app/(dashboard)/layout.tsx`. CMS routes are nested under
+`app/(dashboard)/(cms)/layout.tsx`, are hidden from visitor navigation, and are
+server-blocked on direct access. The exact visitor-visible dashboard routes are
+`/dashboard`, `/tools/metadata`, `/tools/playback`, and `/system`.
 
 Navigation order:
 
@@ -249,6 +268,8 @@ Implemented acceptance criteria:
 - Desktop sidebar and small-screen drawer.
 - Current route indication, actor/role display, logout, and skip-to-content
   target.
+- Visitor navigation excludes every CMS route and offers a return to account
+  sign-in.
 - Scroll containment for wide tables.
 - Shared loading, unexpected error, not-found, and API error presentation.
 
@@ -293,7 +314,11 @@ Acceptance criteria:
 - Session signature, expiry, tamper rejection, cookie flags, logout, and account
   removal behavior are tested.
 - Unauthenticated protected requests redirect to login.
-- CMS secrets are not stored in session payloads.
+- Visitor sessions are signed, contain no actor/CMS secret, and may use general
+  dashboard routes.
+- Visitor access to nested CMS routes is redirected to the account-required
+  dashboard notice.
+- CMS secrets are not stored in any session payload.
 
 Tests:
 
@@ -305,11 +330,12 @@ Tests:
 
 Acceptance criteria:
 
-- Authorization, public routes, body encoding, ETags, request IDs, and 204 are
-  covered.
+- Account Authorization, bearer-free visitor/public routes, body encoding,
+  ETags, request IDs, and 204 are covered.
 - Absolute, traversal, encoded traversal, backslash, and protocol-relative paths
   are rejected.
 - Protected CMS paths cannot be made unauthenticated.
+- Visitor sessions cannot call CMS paths and are rejected before upstream fetch.
 - Structured, non-JSON, timeout, network, and missing-session failures normalize
   safely.
 
@@ -352,9 +378,9 @@ Acceptance criteria:
 
 Files:
 
-- `app/(dashboard)/content/page.tsx`
-- `app/(dashboard)/content/new/page.tsx`
-- `app/(dashboard)/content/[id]/page.tsx`
+- `app/(dashboard)/(cms)/content/page.tsx`
+- `app/(dashboard)/(cms)/content/new/page.tsx`
+- `app/(dashboard)/(cms)/content/[id]/page.tsx`
 - `lib/content/actions.ts`
 - `components/content/metadata-preview.tsx`
 - `components/content/delete-content.tsx`
@@ -393,9 +419,9 @@ Channel mapping:
 
 Files:
 
-- `app/(dashboard)/channels/page.tsx`
-- `app/(dashboard)/channels/new/page.tsx`
-- `app/(dashboard)/channels/[channelId]/page.tsx`
+- `app/(dashboard)/(cms)/channels/page.tsx`
+- `app/(dashboard)/(cms)/channels/new/page.tsx`
+- `app/(dashboard)/(cms)/channels/[channelId]/page.tsx`
 - `components/channels/actions.ts`
 - `components/channels/channel-form.tsx`
 - `components/channels/delete-channel-form.tsx`
@@ -428,10 +454,10 @@ EPG mapping:
 
 Files:
 
-- `app/(dashboard)/epg/page.tsx`
-- `app/(dashboard)/channels/[channelId]/epg/page.tsx`
-- `app/(dashboard)/channels/[channelId]/epg/new/page.tsx`
-- `app/(dashboard)/channels/[channelId]/epg/[programId]/edit/page.tsx`
+- `app/(dashboard)/(cms)/epg/page.tsx`
+- `app/(dashboard)/(cms)/channels/[channelId]/epg/page.tsx`
+- `app/(dashboard)/(cms)/channels/[channelId]/epg/new/page.tsx`
+- `app/(dashboard)/(cms)/channels/[channelId]/epg/[programId]/edit/page.tsx`
 - `components/epg/time.ts`
 - `components/epg/actions.ts`
 - EPG components under `components/epg/`
@@ -463,11 +489,12 @@ File: `app/(dashboard)/dashboard/page.tsx`
 
 Behavior:
 
-- Fetch `/health`, `/ready`, Content `pageSize=1`, and Channel `pageSize=1` in
-  parallel.
+- Fetch public `/health` and `/ready` for every session.
+- Fetch Content and Channel `pageSize=1` totals only for account sessions.
 - Use `PageResponse.total`, not item count, for totals.
 - Keep successful cards visible when a sibling request fails.
 - Provide quick links for catalog, channels, and playback.
+- For visitors, show only links to public metadata, playback, and system tools.
 - Do not claim analytics or an EPG preview.
 
 ### AD-402 System status
@@ -529,6 +556,9 @@ Implemented:
 - Explicit empty/API error states across CMS and EPG screens.
 - Manual conflict recovery; no automatic mutation replay.
 - Safe public-route allowlist and path validation.
+- Signed visitor sessions, visitor-filtered navigation, and a nested server-side
+  account guard for every CMS route.
+- No Authorization header on visitor/public upstream calls.
 - No-store upstream requests.
 - `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and
   `Permissions-Policy` headers.
@@ -576,18 +606,30 @@ Remaining release steps:
 
 ## 14. Manual Deployed Smoke Matrix
 
-1. Editor login and logout.
-2. Invalid login remains generic.
-3. Overview and System show live status.
-4. Content filter, create, edit, resolved preview, conflict handling, and leaf
-   delete.
-5. Channel create and edit.
-6. Editor Channel delete receives the backend forbidden response.
-7. Admin deletes a disposable Channel using typed slug confirmation.
-8. EPG create, adjacent create, overlap rejection, edit, and delete.
-9. Metadata resolution success and missing Content.
-10. Playback allowed, geo-blocked, and device-blocked cases.
-11. Backend cold-start/timeout/unavailable presentation.
+Visitor mode:
+
+1. Start a visitor session and confirm only Overview, Metadata Resolver,
+   Playback Tester, and System appear in navigation.
+2. Confirm `/dashboard`, `/tools/metadata`, `/tools/playback`, and `/system`
+   work.
+3. Request `/content`, `/channels`, `/epg`, and representative nested CMS routes
+   directly; each redirects to the account-required dashboard notice.
+4. Resolve existing and missing metadata; test allowed, geo-blocked, and
+   device-blocked playback cases.
+5. Confirm server/backend diagnostics show no `Authorization` header for
+   visitor public requests, then use **Sign in** to return to `/login`.
+
+Account mode:
+
+1. Editor login/logout works and invalid login remains generic.
+2. Overview shows public status plus CMS totals.
+3. Content filter, create, edit, resolved preview, conflict handling, and leaf
+   delete work with disposable records.
+4. Channel create/edit works; editor delete receives the backend forbidden
+   response.
+5. Admin deletes a disposable Channel using typed slug confirmation.
+6. EPG create, adjacent create, overlap rejection, edit, and delete work.
+7. Metadata, playback, System, and backend unavailable presentation still work.
 
 Do not run destructive checks against non-disposable records.
 
@@ -636,7 +678,8 @@ external deployment remain separate explicit actions.
 Implementation complete:
 
 - All documented routes and backend workflows are present.
-- Editor/admin sessions and server-only credentials behave as specified.
+- Visitor and editor/admin sessions, route guards, and server-only credentials
+  behave as specified.
 - ETag, inheritance, deletion, time conversion, overlap, and playback failure
   semantics are tested.
 - Typecheck, lint, coverage, build, and production audit pass.

@@ -1,8 +1,8 @@
 # SaatCMS Admin Dashboard
 
 A server-rendered administration dashboard for the SaatCMS Middleware Core. It
-provides authenticated Content, Live Channel, and EPG management plus metadata,
-playback, and system-status tools against the existing backend.
+provides authenticated Content, Live Channel, and EPG management plus public
+metadata, playback, and system-status tools against the existing backend.
 
 ## Stack
 
@@ -13,7 +13,9 @@ playback, and system-status tools against the existing backend.
 - Vinext production runtime
 
 CMS bearer credentials stay on the dashboard server. The browser receives only
-an HMAC-signed, HttpOnly session cookie containing the actor ID and expiry.
+an HMAC-signed, HttpOnly session cookie. Account sessions identify the configured
+actor; visitor sessions contain only a visitor discriminator and expiry. Visitor
+requests never receive or send a CMS `Authorization` bearer credential.
 
 ## Local setup
 
@@ -25,7 +27,7 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-Set the copied `.env` values before signing in:
+Set the copied `.env` values before using the dashboard:
 
 - `SAATCMS_API_BASE_URL`: SaatCMS backend origin, without an API path.
 - `CMS_API_KEYS`: the same `<actorId>:<role>:<secret>` entries configured on
@@ -35,25 +37,50 @@ Set the copied `.env` values before signing in:
 - `SAATCMS_REQUEST_TIMEOUT_MS`: upstream timeout from 1,000 to 120,000 ms.
 
 The development server is available at `http://localhost:3000`. Real `.env`
-files are ignored by Git and must never be committed.
+files are ignored by Git and must never be committed. Select **Continue as
+visitor** on `/login` to use the public tools without submitting account
+credentials.
+
+## Access modes
+
+Visitor mode creates an eight-hour signed dashboard session, but it does not
+select a CMS account or attach an upstream bearer header. Visitors can open
+exactly these dashboard routes:
+
+- `/dashboard`
+- `/tools/metadata`
+- `/tools/playback`
+- `/system`
+
+Content, Channel, and EPG navigation is hidden for visitors. Direct visitor
+requests to `/content`, `/channels`, `/epg`, or any of their nested create,
+detail, edit, and schedule routes are server-blocked and redirected to
+`/dashboard?notice=cms-account-required`. The API client independently rejects
+visitor use of CMS endpoints before calling the backend.
+
+Editor and admin account sessions expose all dashboard routes and attach only
+that account's server-side CMS bearer secret to protected upstream requests.
+Both roles intentionally see the same interface; SaatCMS remains the
+authorization source of truth, including admin-only Live Channel deletion.
 
 ## Available workflows
 
-- `/dashboard`: health/readiness and bounded resource totals
-- `/content`: filtered Content CRUD, hierarchy, inherited metadata, playback,
-  safe deletion, and ETag conflict recovery
-- `/channels`: Live Channel CRUD with explicit destructive confirmation
-- `/epg`: channel selector for opening a schedule
-- `/channels/[channelId]/epg`: simple day-based EPG scheduling and overlap
-  feedback
-- `/channels/[channelId]/epg/new`: create a program using local times
-- `/channels/[channelId]/epg/[programId]/edit`: edit a program with its ETag
-- `/tools/metadata`: resolved middleware metadata tester
-- `/tools/playback`: playback authorization tester with country/device headers
-- `/system`: configured backend origin, liveness, and readiness
-
-Editors and admins intentionally see the same interface. SaatCMS remains the
-authorization source of truth, including admin-only Live Channel deletion.
+- `/dashboard`: public health/readiness, plus CMS totals for accounts
+- `/content` (account only): filtered Content CRUD, hierarchy, inherited
+  metadata, playback, safe deletion, and ETag conflict recovery
+- `/channels` (account only): Live Channel CRUD with explicit destructive
+  confirmation
+- `/epg` (account only): channel selector for opening a schedule
+- `/channels/[channelId]/epg` (account only): simple day-based EPG scheduling
+  and overlap feedback
+- `/channels/[channelId]/epg/new` (account only): create a program using local
+  times
+- `/channels/[channelId]/epg/[programId]/edit` (account only): edit a program
+  with its ETag
+- `/tools/metadata`: public resolved middleware metadata tester
+- `/tools/playback`: public playback authorization tester with country/device
+  headers
+- `/system`: public backend origin, liveness, and readiness
 
 ## Quality gates
 
@@ -96,10 +123,32 @@ explicit action in the Render dashboard.
 1. Create or update the Blueprint from `render.yaml`.
 2. Set `CMS_API_KEYS` to the same editor/admin entries configured on the
    backend, then deploy.
-3. Confirm `/login` responds, sign in with a disposable reviewer account, and
-   exercise status, Content, Channel, EPG, metadata, and playback workflows.
-4. Use disposable records for destructive smoke tests and remove them when the
-   check is complete.
+3. Confirm `/login` responds and run the visitor and account smoke checks below.
+4. Use a disposable reviewer account and disposable records for destructive
+   smoke tests, then remove the records when the check is complete.
+
+### Access-mode smoke tests
+
+Visitor mode:
+
+1. Select **Continue as visitor** and confirm `/dashboard`, `/tools/metadata`,
+   `/tools/playback`, and `/system` work.
+2. Confirm Content, Live Channels, and EPG are absent from navigation.
+3. Open `/content`, `/channels`, and `/epg` directly; each must return to the
+   dashboard with the account-required notice.
+4. Exercise metadata and playback. Run `npm test -- test/api.test.ts` to verify
+   the API-client regression check that no `Authorization` header is attached;
+   confirm the same in backend diagnostics when that visibility is available.
+5. Select **Sign in** and confirm the visitor session returns to `/login`.
+
+Account mode:
+
+1. Sign in with a configured editor or admin and confirm all navigation items
+   and CMS routes are available.
+2. Exercise one protected read plus the required disposable Content, Channel,
+   and EPG workflows; protected upstream calls must use the selected account's
+   server-side bearer credential.
+3. Confirm metadata, playback, and System still work, then sign out.
 
 ### Credential rotation
 
