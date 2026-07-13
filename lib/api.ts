@@ -61,10 +61,13 @@ export async function saatCmsRequest<T>(
 
   const env = getServerEnv();
   const headers = new Headers({ Accept: "application/json", ...options.headers });
+  if (headers.has("Authorization")) {
+    throw new Error("Authorization headers are managed by the dashboard API client.");
+  }
 
   if (options.authenticated !== false) {
-    const account = await getDashboardSession();
-    if (!account) {
+    const session = await getDashboardSession();
+    if (!session) {
       throw new SaatCmsApiError({
         status: 401,
         errorCode: "DASHBOARD_SESSION_REQUIRED",
@@ -72,7 +75,15 @@ export async function saatCmsRequest<T>(
         requestId: null,
       });
     }
-    headers.set("Authorization", `Bearer ${account.secret}`);
+    if (session.kind === "visitor") {
+      throw new SaatCmsApiError({
+        status: 403,
+        errorCode: "DASHBOARD_ACCOUNT_REQUIRED",
+        message: "Sign in with an editor or admin account to use CMS management endpoints.",
+        requestId: null,
+      });
+    }
+    headers.set("Authorization", `Bearer ${session.secret}`);
   }
 
   if (options.body !== undefined) headers.set("Content-Type", "application/json");

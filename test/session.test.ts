@@ -33,12 +33,20 @@ vi.mock("next/navigation", () => ({ redirect: cookieHarness.redirect }));
 import {
   clearDashboardSession,
   createDashboardSession,
+  createVisitorDashboardSession,
   getDashboardSession,
+  requireDashboardAccountSession,
   requireDashboardSession,
 } from "@/lib/session";
 
 const originalEnv = { ...process.env };
 const secret = "editor-secret-with-at-least-32-chars";
+
+function decodeCookiePayload(value: string): string {
+  const [encoded] = value.split(".");
+  const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="));
+}
 
 describe("dashboard sessions", () => {
   beforeEach(() => {
@@ -70,7 +78,10 @@ describe("dashboard sessions", () => {
     const [name, value, options] = cookieHarness.set.mock.calls[0];
     expect(name).toBe("saatcms_dashboard_session");
     expect(value).toMatch(/^[\w-]+\.[\w-]+$/);
-    expect(value).not.toContain(secret);
+    const payload = decodeCookiePayload(value);
+    expect(payload).toContain('"kind":"account"');
+    expect(payload).toContain('"actorId":"reviewer"');
+    expect(payload).not.toContain(secret);
     expect(options).toMatchObject({
       httpOnly: true,
       secure: false,
@@ -78,9 +89,33 @@ describe("dashboard sessions", () => {
       path: "/",
     });
     await expect(getDashboardSession()).resolves.toEqual({
+      kind: "account",
       actorId: "reviewer",
       role: "editor",
       secret,
+    });
+  });
+
+  it("round-trips a signed visitor session without storing an account identity or secret", async () => {
+    await createVisitorDashboardSession();
+
+    expect(cookieHarness.set).toHaveBeenCalledOnce();
+    const [, value, options] = cookieHarness.set.mock.calls[0];
+    expect(value).toMatch(/^[\w-]+\.[\w-]+$/);
+    const payload = decodeCookiePayload(value);
+    expect(payload).toContain('"kind":"visitor"');
+    expect(payload).not.toContain("reviewer");
+    expect(payload).not.toContain(secret);
+    expect(options).toMatchObject({
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      path: "/",
+    });
+    await expect(getDashboardSession()).resolves.toEqual({
+      kind: "visitor",
+      actorId: "visitor",
+      role: "visitor",
     });
   });
 
@@ -128,5 +163,25 @@ describe("dashboard sessions", () => {
     cookieHarness.values.clear();
     await expect(requireDashboardSession()).rejects.toThrow("NEXT_REDIRECT");
     expect(cookieHarness.redirect).toHaveBeenCalledWith("/login");
+  });
+
+  it("allows either session through the dashboard guard but requires an account for CMS routes", async () => {
+    await createVisitorDashboardSession();
+
+    await expect(requireDashboardSession()).resolves.toMatchObject({ kind: "visitor" });
+    await expect(requireDashboardAccountSession()).rejects.toThrow("NEXT_REDIRECT");
+    expect(cookieHarness.redirect).toHaveBeenCalledWith(
+      "/dashboard?notice=cms-account-required",
+    );
+
+    cookieHarness.redirect.mockClear();
+    await createDashboardSession("reviewer");
+
+    await expect(requireDashboardAccountSession()).resolves.toMatchObject({
+      kind: "account",
+      actorId: "reviewer",
+      role: "editor",
+    });
+    expect(cookieHarness.redirect).not.toHaveBeenCalled();
   });
 });

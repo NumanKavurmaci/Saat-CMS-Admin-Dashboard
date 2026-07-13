@@ -4,6 +4,7 @@ const harness = vi.hoisted(() => ({
   authenticate: vi.fn(),
   clearSession: vi.fn(),
   createSession: vi.fn(),
+  createVisitorSession: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
   }),
@@ -16,11 +17,12 @@ vi.mock("@/lib/accounts", () => ({
 vi.mock("@/lib/session", () => ({
   clearDashboardSession: harness.clearSession,
   createDashboardSession: harness.createSession,
+  createVisitorDashboardSession: harness.createVisitorSession,
 }));
 
 vi.mock("next/navigation", () => ({ redirect: harness.redirect }));
 
-import { loginAction, logoutAction } from "@/app/login/actions";
+import { loginAction, logoutAction, visitorLoginAction } from "@/app/login/actions";
 
 function credentials(actorId = "reviewer", secret = "editor-secret") {
   const formData = new FormData();
@@ -64,6 +66,18 @@ describe("dashboard authentication actions", () => {
     await expect(loginAction({ error: null }, credentials())).rejects.toThrow("NEXT_REDIRECT");
     expect(harness.createSession).toHaveBeenCalledWith("reviewer");
     expect(harness.redirect).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("creates a visitor session before redirecting to the dashboard", async () => {
+    await expect(visitorLoginAction()).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(harness.createVisitorSession).toHaveBeenCalledOnce();
+    expect(harness.redirect).toHaveBeenCalledWith("/dashboard");
+    expect(harness.createVisitorSession.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.redirect.mock.invocationCallOrder[0],
+    );
+    expect(harness.authenticate).not.toHaveBeenCalled();
+    expect(harness.createSession).not.toHaveBeenCalled();
   });
 
   it("clears the current session before redirecting on logout", async () => {

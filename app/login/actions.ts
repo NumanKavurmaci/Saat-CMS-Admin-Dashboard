@@ -2,7 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { authenticateDashboardAccount } from "@/lib/accounts";
-import { clearDashboardSession, createDashboardSession } from "@/lib/session";
+import {
+  clearDashboardSession,
+  createDashboardSession,
+  createVisitorDashboardSession,
+} from "@/lib/session";
 
 export type LoginState = { error: string | null };
 
@@ -20,6 +24,11 @@ export async function loginAction(_: LoginState, formData: FormData): Promise<Lo
   if (!account) return { error: "The supplied credentials are not valid." };
 
   await createDashboardSession(account.actorId);
+  redirect("/dashboard");
+}
+
+export async function visitorLoginAction() {
+  await createVisitorDashboardSession();
   redirect("/dashboard");
 }
 
