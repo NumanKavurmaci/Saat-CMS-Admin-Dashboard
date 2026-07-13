@@ -10,6 +10,12 @@ Build a separate desktop-first Next.js admin dashboard for the SaatCMS backend. 
 
 The dashboard will be maintained in a new repository and deployed as a separate Render web service alongside the existing backend and PostgreSQL database.
 
+Implementation status (July 13, 2026): the application, automated quality
+gates, CI workflow, and Render Blueprint are implemented on the development
+branch. Creating the external Render service and running deployed smoke tests
+remain explicit release actions; this document does not claim the dashboard is
+currently live.
+
 ## Product Direction
 
 ### Accepted decisions
@@ -19,7 +25,7 @@ The dashboard will be maintained in a new repository and deployed as a separate 
 - Primary viewport: desktop; mobile-specific optimization is out of scope for the first release.
 - Theme: dark by default, using a restrained slate/navy palette with blue accents.
 - Accounts: a small set of environment-managed users maintained by the project owner.
-- Roles: reuse the backend's existing `reader`, `editor`, and `admin` roles without building a separate permissions system.
+- Roles: permit configured `editor` and `admin` accounts; both use the same dashboard screens and controls.
 - Data: the existing backend remains the only application data source.
 - Deployment: a separate Render web service in the same Render environment as the backend.
 - Statistics: useful summary data only; no analytics system or reporting database.
@@ -42,7 +48,7 @@ Browser
                  -> PostgreSQL
 ```
 
-The browser will communicate with the Next.js application on the same origin. Next.js Server Components, Server Actions, and explicit Route Handlers will call the SaatCMS backend.
+The browser will communicate with the Next.js application on the same origin. Next.js Server Components and Server Actions call the SaatCMS backend.
 
 This design is intentionally small:
 
@@ -94,9 +100,8 @@ This is deliberately simpler than a production identity platform while keeping c
 
 ### Role behavior
 
-All authenticated users see the same dashboard navigation and resource screens. The backend remains the authorization source of truth:
+All authenticated editor/admin users see the same dashboard navigation and resource screens. The backend remains the authorization source of truth:
 
-- Readers can view and list.
 - Editors can create, update, and delete Content and EPG Programs.
 - Admins can also delete Live Channels.
 
@@ -107,9 +112,10 @@ The dashboard may disable an action that the current role cannot perform, but it
 The dashboard repository will include `.env.example` with placeholders only:
 
 ```dotenv
-SAATCMS_API_BASE_URL=http://localhost:3000
-CMS_API_KEYS="numan:admin:replace-with-at-least-32-characters,reviewer:editor:replace-with-at-least-32-characters"
-DASHBOARD_SESSION_SECRET=replace-with-a-long-random-secret
+SAATCMS_API_BASE_URL="https://backend-developer-take-home-assignment.onrender.com"
+CMS_API_KEYS="reviewer:editor:replace-with-at-least-32-characters,owner:admin:replace-with-at-least-32-characters"
+DASHBOARD_SESSION_SECRET="replace-with-at-least-32-random-characters"
+SAATCMS_REQUEST_TIMEOUT_MS="30000"
 ```
 
 Rules:
@@ -153,7 +159,10 @@ Rules:
 | `/channels`                 | Search, paginate, create, edit, and delete live channels            | P0       |
 | `/channels/[channelId]`     | Channel details and EPG entry point                                 | P0       |
 | `/channels/[channelId]/epg` | Time-window schedule, create, edit, and delete programs             | P0       |
-| `/system`                   | Backend identity, liveness, and readiness checks                    | P1       |
+| `/epg`                      | Select a Channel to open its EPG schedule                          | P0       |
+| `/channels/[channelId]/epg/new` | Create an EPG Program                                          | P0       |
+| `/channels/[channelId]/epg/[programId]/edit` | Edit an EPG Program using its ETag                  | P0       |
+| `/system`                   | Configured backend origin, liveness, and readiness checks           | P1       |
 | `/tools/metadata`           | Test resolved middleware content metadata                           | P2       |
 | `/tools/playback`           | Test playback authorization with request headers                    | P2       |
 
@@ -164,8 +173,6 @@ The home screen will provide a quick operational summary without introducing new
 - Backend liveness and database readiness.
 - Total Content count from the paginated Content response.
 - Total Live Channel count from the paginated Channel response.
-- Content-type breakdown using the existing type filters.
-- Upcoming EPG preview for a small number of visible channels and a bounded time window.
 - Quick actions: create Content, create Channel, and open EPG schedule.
 - Clear warning when the backend is unavailable or returns a configuration error.
 
@@ -179,7 +186,7 @@ The dashboard will use existing server-side backend filters rather than download
 - Live Channels: case-insensitive name and slug search, page, and page size.
 - EPG Programs: channel, required time window, page, and page size.
 
-Search state will be represented in URL query parameters so filtered views can be refreshed and shared. Input changes will be debounced where appropriate.
+Search state is represented in URL query parameters so filtered views can be refreshed and shared. Filters submit explicitly rather than relying on client-side debouncing.
 
 Global cross-resource search is not included because the backend has no single cross-resource search endpoint. It can be added later only if it becomes useful.
 
@@ -210,60 +217,52 @@ The implementation must preserve backend-specific behavior:
 
 - Next.js App Router and TypeScript.
 - React Server Components for protected layouts and initial reads.
-- Server Actions or explicit Route Handlers for mutations and interactive data requests.
+- Server Actions for mutations and interactive data requests.
 - Tailwind CSS for layout and theme tokens.
-- shadcn/ui primitives for accessible dashboard components.
+- Small local accessible components styled with Tailwind CSS.
 - Lucide icons.
-- Zod schemas for environment, form, and API-boundary validation.
+- Zod schema validation for the server environment, with focused domain mapping at form boundaries.
 - A small typed server-only API client built from the repository's OpenAPI contract and API documentation.
-- Vitest and React Testing Library for unit/component tests.
-- Playwright for critical login and CRUD journeys.
+- Vitest and React Testing Library coverage for actions, forms, components, and shared libraries. Browser-level end-to-end automation is deferred.
 
 Avoid adding a global state library until a concrete need appears. URL state, server data, and local component state are sufficient for the first release.
 
 ## Proposed Repository Structure
 
 ```text
-src/
-  app/
-    (auth)/
-      login/
-    (dashboard)/
-      dashboard/
-      content/
-      channels/
-      system/
-      tools/
-    api/
-      session/
-  components/
-    layout/
-    ui/
-    tables/
-    forms/
-  features/
-    auth/
+app/
+  login/
+  (dashboard)/
+    dashboard/
     content/
     channels/
     epg/
     system/
     tools/
-  lib/
-    auth/
-    api/
-    env/
-    validation/
-  types/
+components/
+  content/
+  channels/
+  epg/
+lib/
+  content/
+test/
+worker/
 ```
 
-Feature-specific forms, schemas, and presentation components stay within their feature folder. Reusable visual primitives stay in `components/ui`. Backend credentials and API calls stay in server-only modules.
+The implementation uses root-level folders rather than a `src/` directory.
+Feature-specific presentation stays under `components/`, while server-only
+environment, account, session, API, and domain logic stays under `lib/`.
 
 ## Delivery Plan
+
+Phases 1-5 are implemented. Phase 6 is complete for local verification and
+Render configuration; external deployment and deployed smoke testing remain
+pending.
 
 ### Phase 1 — Repository foundation
 
 - Create the new repository with Next.js, TypeScript, linting, and tests.
-- Configure Tailwind, theme tokens, shadcn/ui, icons, and fonts.
+- Configure Tailwind, theme tokens, local UI components, icons, and fonts.
 - Add `.env.example`, environment validation, and server-only module boundaries.
 - Build the dark application shell and responsive minimum-width behavior.
 
@@ -291,15 +290,15 @@ Exit criteria: every Content CMS endpoint is usable through the dashboard.
 
 - Build Channel list, search, creation, editing, and deletion flow.
 - Build channel-scoped EPG schedule with time-window navigation.
-- Add EPG create/edit dialogs, overlap errors, ETags, and deletion.
+- Add dedicated EPG create/edit screens, overlap errors, ETags, and deletion.
 - Make admin-only channel deletion state clear.
 
 Exit criteria: every Live Channel and EPG CMS endpoint is usable through the dashboard.
 
 ### Phase 5 — Overview and middleware tools
 
-- Build the overview cards and bounded EPG preview.
-- Add backend identity and status screen.
+- Build the overview health/readiness and bounded resource-total cards.
+- Add backend origin and status screen.
 - Add resolved metadata tester.
 - Add playback tester with user ID, country, and device controls.
 
@@ -307,14 +306,14 @@ Exit criteria: all non-CMS backend endpoints are represented in the dashboard.
 
 ### Phase 6 — Quality and deployment
 
-- Add component, integration, and end-to-end coverage for critical paths.
+- Add action, utility, and component coverage for critical paths.
 - Verify keyboard navigation, contrast, loading, empty, error, and offline states.
 - Add production headers and prevent sensitive caching.
 - Create the Render web service and configure shared secrets.
 - Run smoke tests against the deployed backend.
 - Document local development, account rotation, deployment, and rollback.
 
-Exit criteria: the dashboard is deployed on Render and all priority workflows pass smoke tests.
+Exit criteria: the dashboard is deployed on Render and all priority workflows pass smoke tests. This release gate remains pending.
 
 ## Acceptance Criteria
 
@@ -328,7 +327,7 @@ Exit criteria: the dashboard is deployed on Render and all priority workflows pa
 - The default UI is a polished, consistent dark desktop SaaS dashboard.
 - The browser never receives the raw `CMS_API_KEYS` configuration.
 - No bearer token is written to local storage or session storage.
-- Reader/editor/admin restrictions continue to be enforced by the backend.
+- Editor/admin authorization restrictions continue to be enforced by the backend.
 - The production dashboard and backend communicate successfully on Render.
 
 ## Testing Strategy
@@ -350,7 +349,7 @@ Exit criteria: the dashboard is deployed on Render and all priority workflows pa
 - Content, Channel, and EPG form submissions.
 - Structured handling of `400`, `401`, `403`, `404`, `409`, `429`, and `503` responses.
 
-### End-to-end tests
+### Manual deployed smoke tests
 
 - Admin login and logout.
 - Content search, create, edit, and delete.
@@ -384,16 +383,15 @@ Exit criteria: the dashboard is deployed on Render and all priority workflows pa
 | Session tampering                         | Sign session data and reject invalid or expired signatures                                    |
 | Stale edits overwrite changes             | Preserve `ETag` and `If-Match` behavior                                                       |
 | Destructive channel deletion              | Role-aware UI, explicit consequence text, confirmation dialog, and `confirm=true`             |
-| Dashboard summary triggers too many calls | Use paginated totals and a bounded EPG preview only                                           |
+| Dashboard summary triggers too many calls | Use paginated totals and omit the optional EPG preview                                        |
 | Backend unavailable                       | Short request timeout, clear status UI, retry control, and no misleading cached success state |
 
 ## Source Contracts
 
-- [CMS CRUD API](../../api/cms-crud-api.md)
-- [CMS OpenAPI contract](../../api/cms-crud-openapi.yaml)
-- [CMS EPG Program API](../../api/cms-epg-program-api.md)
-- [Content Metadata API](../../api/content-metadata-api.md)
-- [Middleware Playback API](../../api/mw-playback-api.md)
+The CMS CRUD, OpenAPI, EPG, metadata, and playback contracts are maintained in
+the separate SaatCMS backend repository and were used as the implementation
+authority. They are intentionally not duplicated in this dashboard repository.
+
 - [Next.js Backend for Frontend guide](https://nextjs.org/docs/app/guides/backend-for-frontend)
 - [Next.js environment variable guide](https://nextjs.org/docs/app/guides/environment-variables)
 - [Tailwind CSS dark mode](https://tailwindcss.com/docs/dark-mode)

@@ -1,229 +1,153 @@
 # SaatCMS Admin Dashboard Low-Level Implementation Plan
 
-## 1. Purpose and Precedence
+## 1. Purpose and Status
 
-This document converts the [high-level dashboard plan](admin-dashboard-project-plan.md)
-into an implementation-ready backlog. It defines the planned routes, modules,
-data flow, task order, acceptance criteria, and Vitest coverage for the first
-release.
+This document is the implementation-level companion to the
+[project plan](admin-dashboard-project-plan.md). It records concrete files,
+route behavior, backend mappings, tests, phase gates, and remaining release
+work.
 
-When documents disagree, use this order:
+Precedence when behavior is unclear:
 
-1. The implemented SaatCMS backend and its OpenAPI contract.
-2. Current backend API and domain documentation.
-3. This low-level dashboard plan.
-4. The high-level dashboard plan.
+1. Implemented SaatCMS backend behavior and OpenAPI contract.
+2. Current backend API/domain documentation.
+3. This low-level plan.
+4. The high-level project plan.
 
-The dashboard repository is currently documentation-only. Phase 0 creates the
-application foundation.
+Status as of July 13, 2026:
+
+- Phases 0-5 are implemented locally on the dashboard development branch.
+- Typecheck, lint, Vitest coverage, production build, and production dependency
+  audit are the required local/CI gates.
+- `render.yaml` is implemented, but no external dashboard service is considered
+  deployed until Render is connected and smoke tests pass.
 
 ## 2. Locked Decisions
 
-- Use Next.js App Router, React, TypeScript, Tailwind CSS, and Vitest.
-- Use React Testing Library for component tests.
-- Use Server Components for initial reads and Server Actions for mutations.
-- Do not add a client-side global state library in the first release.
-- Keep all SaatCMS bearer credentials on the Next.js server.
-- Copy the backend's `CMS_API_KEYS` value into the dashboard environment.
-- Permit dashboard login only for configured `editor` and `admin` accounts.
-- Render the same navigation and management screens for editors and admins.
-- Let the backend enforce the admin-only Live Channel deletion rule.
-- Use the deployed backend at
-  `https://backend-developer-take-home-assignment.onrender.com/` for the shared
-  demo.
-- Build a simple chronological EPG schedule, not a drag-and-drop calendar.
-- Include a dedicated Playback Tester page.
-- Treat responsive behavior as a minimum usability requirement, not a design
-  priority.
-- Do not add Datadog, analytics, audit history, or custom reporting in this
-  release.
+- Stack: Next.js App Router, React, strict TypeScript, Tailwind CSS, Vinext,
+  Vitest, and React Testing Library.
+- Source layout: root-level `app/`, `components/`, `lib/`, and `test/`; there is
+  no `src/` directory.
+- UI primitives: small local components plus Lucide icons; shadcn/ui is not a
+  dependency.
+- Data flow: Server Components for protected reads and Server Actions for
+  mutations/tester submissions.
+- State: URL query parameters, server data, and local component state; no global
+  client-state library.
+- Authentication: only configured `editor` and `admin` accounts may sign in.
+- Roles: both roles see the same dashboard; SaatCMS enforces authorization.
+- Secrets: backend bearer credentials remain in server-only environment data.
+- EPG: chronological channel/day view with local-to-UTC conversion.
+- Playback: dedicated tester page.
+- Deployment: separate Render web service using the live SaatCMS backend.
+- Deferred: Datadog, analytics, audit UI, Playwright, drag-and-drop scheduling,
+  and role-specific dashboard behavior.
 
-## 3. Runtime Architecture
+## 3. Runtime Data Flow
 
 ```text
-Browser
-  -> Next.js page or Server Action
-       -> validate signed dashboard session
-       -> resolve actor from server-only CMS_API_KEYS
-       -> server-only SaatCMS API client
-            -> Authorization: Bearer <actor secret>
+Browser request
+  -> root or protected App Router page
+       -> requireDashboardSession()
+       -> actor lookup from CMS_API_KEYS
+       -> saatCmsRequest(relativePath)
+            -> optional Authorization bearer header
+            -> no-store fetch with timeout
             -> SaatCMS backend
+```
+
+Mutation flow:
+
+```text
+Form
+  -> Server Action
+       -> validate/map fields
+       -> saatCmsRequest(POST|PATCH|DELETE)
+       -> send If-Match where required
+       -> normalize safe API failure or revalidate affected paths
+       -> redirect after success
 ```
 
 Rules:
 
-- The browser never receives a CMS bearer credential.
-- Do not create a generic `/api/proxy/*` route.
-- Server Components perform read requests directly through the server API
-  client.
-- Server Actions perform create, update, delete, login, logout, and tester
-  requests.
-- Every protected Server Action calls `requireSession()` independently.
-- CMS and middleware data requests use `cache: "no-store"`.
-- Successful mutations call `revalidatePath()` for affected list/detail routes.
-- Forms use progressive server submission; client components are limited to
-  interactive field behavior, pending state, dialogs, and toast presentation.
+- Do not introduce a generic `/api/proxy/*` route.
+- Every authenticated backend request resolves the current session again.
+- Public unauthenticated calls are restricted to `/`, `/health`, `/ready`, and
+  `/api/v1/mw/*`.
+- API paths must be safe relative paths without traversal, backslashes, or
+  protocol-relative forms.
+- API errors expose only status, error code, safe message, and request ID.
+- Unexpected, timeout, and non-JSON failures map to safe dashboard errors.
+- Backend reads use `cache: "no-store"`.
+- Successful mutations revalidate affected list/detail routes.
 
 ## 4. Environment Contract
 
-Create `.env.example`:
+`.env.example` is the canonical template:
 
 ```dotenv
 SAATCMS_API_BASE_URL="https://backend-developer-take-home-assignment.onrender.com"
 CMS_API_KEYS="reviewer:editor:replace-with-at-least-32-characters,owner:admin:replace-with-at-least-32-characters"
-DASHBOARD_SESSION_SECRET="replace-with-at-least-32-random-bytes"
+DASHBOARD_SESSION_SECRET="replace-with-at-least-32-random-characters"
 SAATCMS_REQUEST_TIMEOUT_MS="30000"
 ```
 
-Local backend development can override the base URL with
-`http://localhost:3000`.
+Validation requirements:
 
-Validation rules:
+- Base URL is absolute HTTP(S), normalized without a trailing slash.
+- Account entries use `<actorId>:<role>:<secret>`.
+- Only `editor` and `admin` accounts with secrets of at least 32 characters are
+  accepted by the dashboard parser.
+- Duplicate accepted actor IDs fail configuration parsing.
+- At least one accepted dashboard account is required.
+- Session secret contains at least 32 characters.
+- Timeout is an integer from 1,000 to 120,000 milliseconds.
+- Invalid environment errors are diagnostic but never include secret values.
+- `.env` and other real environment files stay ignored; `.env.example` remains
+  tracked.
 
-- `SAATCMS_API_BASE_URL` must be an absolute `http` or `https` URL.
-- `CMS_API_KEYS` must contain at least one valid `editor` or `admin` entry.
-- Each entry must use `<actorId>:<role>:<secret>`.
-- Actor IDs must be unique.
-- Dashboard login must reject `reader` accounts for the first release.
-- `DASHBOARD_SESSION_SECRET` must contain at least 32 characters.
-- Request timeout must be an integer between 1,000 and 120,000 milliseconds.
-- No secret variable may use a `NEXT_PUBLIC_` prefix.
-- Environment validation must run only in server modules and fail early with a
-  non-secret diagnostic message.
+Implementation files:
 
-## 5. Route and Screen Contract
+- `lib/env.ts`
+- `lib/accounts.ts`
+- `.env.example`
 
-| Route                       | Screen            | Primary data/actions                                  |
-| --------------------------- | ----------------- | ----------------------------------------------------- |
-| `/login`                    | Dashboard sign-in | Actor ID and secret login                             |
-| `/dashboard`                | Overview          | Health, readiness, totals, type counts, quick actions |
-| `/content`                  | Content library   | Filtered/paginated CMS Content list                   |
-| `/content/new`              | New Content       | Create Series, Season, Episode, or Movie              |
-| `/content/[id]`             | Content detail    | Raw CMS data, resolved metadata, edit, delete         |
-| `/channels`                 | Live Channels     | Filtered/paginated list and create action             |
-| `/channels/new`             | New Channel       | Create name and slug                                  |
-| `/channels/[channelId]`     | Channel detail    | Edit, delete, and EPG entry point                     |
-| `/channels/[channelId]/epg` | EPG schedule      | Day window, list, create/edit/delete programs         |
-| `/tools/metadata`           | Metadata Resolver | Test `GET /api/v1/mw/content/{contentId}`             |
-| `/tools/playback`           | Playback Tester   | Test playback headers and authorization               |
-| `/system`                   | System status     | Backend identity, health, readiness, base URL         |
+## 5. Authentication and Session Contract
 
-Navigation order:
+Login behavior:
 
-1. Overview
-2. Content
-3. Live Channels
-4. Metadata Resolver
-5. Playback Tester
-6. System
+1. Accept actor ID and secret in `app/login/login-form.tsx`.
+2. `app/login/actions.ts` compares the secret without early byte comparison.
+3. Return one generic invalid-credentials error.
+4. Create an eight-hour HMAC-SHA-256 signed session on success.
+5. Redirect to `/dashboard`.
 
-The top bar shows the current actor ID and configured role for information only.
-The role does not change navigation or normal editing controls. If an editor
-attempts admin-only channel deletion, show the backend's `CMS_FORBIDDEN` error.
+Cookie settings:
 
-## 6. Planned Source Structure
+- Name: `saatcms_dashboard_session`
+- `HttpOnly`
+- `SameSite=Lax`
+- `Path=/`
+- `Secure` in production
+- Absolute expiry eight hours after creation
 
-```text
-src/
-  app/
-    (auth)/
-      login/
-        page.tsx
-    (dashboard)/
-      layout.tsx
-      dashboard/page.tsx
-      content/
-        page.tsx
-        new/page.tsx
-        [id]/page.tsx
-      channels/
-        page.tsx
-        new/page.tsx
-        [channelId]/
-          page.tsx
-          epg/page.tsx
-      tools/
-        metadata/page.tsx
-        playback/page.tsx
-      system/page.tsx
-    layout.tsx
-    page.tsx
-    globals.css
-  components/
-    layout/
-      app-sidebar.tsx
-      app-topbar.tsx
-      breadcrumb.tsx
-    ui/
-      alert.tsx
-      badge.tsx
-      button.tsx
-      dialog.tsx
-      empty-state.tsx
-      field.tsx
-      pagination.tsx
-      skeleton.tsx
-      table.tsx
-      toast.tsx
-  features/
-    auth/
-      actions.ts
-      login-form.tsx
-    content/
-      actions.ts
-      content-form.tsx
-      content-table.tsx
-      content-types.ts
-      content-validation.ts
-    channels/
-      actions.ts
-      channel-form.tsx
-      channel-table.tsx
-      channel-validation.ts
-    epg/
-      actions.ts
-      epg-form.tsx
-      epg-schedule.tsx
-      epg-validation.ts
-      time.ts
-    overview/
-      overview-data.ts
-      overview-cards.tsx
-    system/
-      status-data.ts
-    tools/
-      metadata-action.ts
-      playback-action.ts
-      playback-form.tsx
-  lib/
-    api/
-      client.ts
-      errors.ts
-      response.ts
-      types.ts
-    auth/
-      accounts.ts
-      session.ts
-      guards.ts
-    env/
-      server-env.ts
-    forms/
-      action-state.ts
-    urls/
-      search-params.ts
-  test/
-    factories/
-    setup.ts
-```
+Session payload contains only `actorId` and `expiresAt`. Each session read also
+requires the actor to still exist in the current `CMS_API_KEYS` value. Logout
+deletes the cookie and redirects to `/login`.
 
-Keep feature-specific components and schemas inside `features`. Only promote a
-component to `components/ui` after it is reused by at least two features.
+Implementation files:
 
-## 7. Shared Data Contracts
+- `app/page.tsx`
+- `app/login/page.tsx`
+- `app/login/login-form.tsx`
+- `app/login/actions.ts`
+- `app/(dashboard)/layout.tsx`
+- `lib/accounts.ts`
+- `lib/session.ts`
 
-### API response wrapper
+## 6. Shared API Contract
 
-The server client returns metadata separately from the response body:
+`lib/api.ts` returns:
 
 ```ts
 type ApiResult<T> = {
@@ -234,10 +158,10 @@ type ApiResult<T> = {
 };
 ```
 
-Expected API failures normalize to:
+Expected failures become `SaatCmsApiError` with:
 
 ```ts
-type SaatCmsApiError = {
+type ApiErrorShape = {
   status: number;
   errorCode: string;
   message: string;
@@ -245,804 +169,485 @@ type SaatCmsApiError = {
 };
 ```
 
-Do not pass backend stack traces or raw response bodies to client components.
-Unexpected/non-JSON failures become `UPSTREAM_REQUEST_FAILED` with a safe
-message.
+Required request behavior:
 
-### Pagination
+- Attach the current actor secret as `Authorization: Bearer ...` unless the
+  request is explicitly public.
+- Add JSON headers only when a body exists.
+- Forward `If-Match` when supplied.
+- Capture `ETag` and `X-Request-Id`.
+- Return `undefined` for successful `204` bodies.
+- Abort after `SAATCMS_REQUEST_TIMEOUT_MS`.
 
-```ts
-type PageResponse<T> = {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-};
-```
+## 7. Route Contract
 
-Dashboard defaults:
+| Route | Implementation |
+| --- | --- |
+| `/` | Redirect to `/dashboard` or `/login` based on session |
+| `/login` | Dashboard sign-in |
+| `/dashboard` | Health/readiness and CMS totals |
+| `/content` | Content filters, pagination, and table |
+| `/content/new` | Content create form |
+| `/content/[id]` | Content edit/delete and metadata comparison |
+| `/channels` | Channel filters, pagination, and cards |
+| `/channels/new` | Channel create form |
+| `/channels/[channelId]` | Channel edit/delete and EPG link |
+| `/epg` | Channel selector |
+| `/channels/[channelId]/epg` | Day-window schedule |
+| `/channels/[channelId]/epg/new` | EPG create form |
+| `/channels/[channelId]/epg/[programId]/edit` | EPG edit form |
+| `/tools/metadata` | Metadata resolution form |
+| `/tools/playback` | Playback authorization form |
+| `/system` | Backend origin, liveness, and readiness |
 
-- `page=1`
-- `pageSize=20`
-- allowed UI page sizes: `20`, `50`, `100`
-- changing a filter resets `page` to `1`
-- invalid URL values fall back to defaults before calling the backend
+All routes except `/login` and the root redirect are protected by
+`app/(dashboard)/layout.tsx`.
 
-### Mutation action state
+Navigation order:
 
-```ts
-type ActionState<T = undefined> =
-  | { status: "idle" }
-  | { status: "success"; data?: T; message: string }
-  | {
-      status: "error";
-      errorCode: string;
-      message: string;
-      fieldErrors?: Record<string, string[]>;
-      requestId?: string | null;
-    };
-```
+1. Overview
+2. Content
+3. Live Channels
+4. EPG Schedule
+5. Metadata Resolver
+6. Playback Tester
+7. System
 
-Field-level validation failures stay next to the field. Backend domain errors
-appear in the form alert or toast, depending on whether the form remains open.
+## 8. Phase 0: Foundation — Implemented
 
-## 8. Phase 0 - Repository Foundation
+### AD-001 Runtime and repository setup
 
-### AD-001 Scaffold Next.js
+Files:
 
-Implementation:
+- `package.json`, `package-lock.json`
+- `tsconfig.json`, `next.config.ts`, `vite.config.ts`, `vitest.config.ts`
+- `postcss.config.mjs`, `eslint.config.mjs`
+- `worker/index.ts`
+- `.gitignore`, `.gitattributes`
 
-- Scaffold Next.js App Router with TypeScript and `src/` layout.
-- Enable strict TypeScript.
-- Add scripts: `dev`, `build`, `start`, `lint`, `typecheck`, `test`, and
-  `test:coverage`.
-- Preserve the existing `docs/` folder and replace the placeholder README with
-  run instructions after the scaffold succeeds.
-- Add `.gitignore` entries for `.env*`, with `.env.example` explicitly allowed.
+Implemented acceptance criteria:
+
+- Node.js `>=22.13.0` is declared.
+- `dev`, `build`, `start`, `lint`, `typecheck`, `test`, `test:watch`, and
+  `test:coverage` scripts exist.
+- Strict TypeScript, Tailwind, ESLint, Vitest, and Vinext are configured.
+- Real environment files and generated outputs are ignored.
+
+### AD-002 Application shell
+
+Files:
+
+- `app/layout.tsx`, `app/globals.css`
+- `app/(dashboard)/layout.tsx`, `loading.tsx`, `error.tsx`
+- `app/not-found.tsx`
+- `components/app-shell.tsx`
+- shared components in `components/`
+
+Implemented acceptance criteria:
+
+- Dark token system and shared panel/form/button styles.
+- Desktop sidebar and small-screen drawer.
+- Current route indication, actor/role display, logout, and skip-to-content
+  target.
+- Scroll containment for wide tables.
+- Shared loading, unexpected error, not-found, and API error presentation.
+
+### AD-003 Test and coverage harness
+
+Files:
+
+- `vitest.config.ts`
+- `test/setup.ts`, `test/server-only.ts`
+
+Implemented acceptance criteria:
+
+- `jsdom`, React Testing Library, jest-dom, and `@/` alias are configured.
+- The `server-only` marker is safely aliased only in tests.
+- Coverage includes Server Action files, form components, shared components,
+  and library modules.
+- Branch, function, line, and statement thresholds are each 80%.
+- Passive route pages and type-only modules are not used to inflate or suppress
+  the selected core-logic gate.
+
+## 9. Phase 1: Auth and API Client — Implemented
+
+### AD-101 Environment and account parsing
 
 Acceptance criteria:
 
-- `npm run build`, `npm run typecheck`, and `npm test` exit successfully.
-- `/` redirects to `/dashboard` for an authenticated session and `/login`
-  otherwise.
-- No generated build output or local environment file is committed.
+- Valid editor/admin entries parse.
+- Invalid roles and short/malformed entries are ignored.
+- Duplicates and an empty accepted account set fail safely.
+- Secrets containing additional colons remain intact.
+- Authentication returns no actor-specific failure detail.
 
-### AD-002 Configure Tailwind and visual tokens
+Tests:
 
-Implementation:
+- `test/env.test.ts`
+- `test/accounts.test.ts`
 
-- Define dark slate/navy surface, border, foreground, muted, primary, success,
-  warning, and destructive tokens in `globals.css`.
-- Use a dark theme only in the first release.
-- Add a fixed desktop sidebar and top bar.
-- At widths below 1,024px, collapse the sidebar into a menu and allow tables to
-  scroll horizontally. Do not create mobile-specific layouts.
-- Add accessible focus styles and a skip-to-content link.
+### AD-102 Signed sessions and protected routes
 
 Acceptance criteria:
 
-- All routes use the same shell and token system.
-- Keyboard focus is visible.
-- Content remains usable at 768px without horizontal page overflow except
-  inside intentionally scrollable tables.
+- Session signature, expiry, tamper rejection, cookie flags, logout, and account
+  removal behavior are tested.
+- Unauthenticated protected requests redirect to login.
+- CMS secrets are not stored in session payloads.
 
 Tests:
 
-- Sidebar renders all navigation labels.
-- Active route receives the active state.
-- Collapsed navigation can be opened and closed by keyboard.
+- `test/session.test.ts`
+- `app/login/actions.test.ts`
+- `app/login/login-form.test.tsx`
 
-### AD-003 Configure Vitest
-
-Implementation:
-
-- Configure Vitest with `jsdom`, React Testing Library, and jest-dom matchers.
-- Add the `@/` path alias to Vitest.
-- Create deterministic factories for Content, Channel, EPG, session, and API
-  error data.
-- Enable coverage for `src/**/*.{ts,tsx}` while excluding generated Next.js
-  types and passive type-only modules.
+### AD-103 Server API client
 
 Acceptance criteria:
 
-- A component smoke test and a server utility test pass.
-- `npm run test:coverage` produces a local report.
-- Phase gates require tests for changed behavior; the initial global coverage
-  threshold is 80%, raised only after stable coverage evidence exists.
-
-## 9. Phase 1 - Environment, Authentication, and API Client
-
-### AD-101 Validate server environment
-
-Files:
-
-- `src/lib/env/server-env.ts`
-- `.env.example`
-
-Implementation:
-
-- Parse environment values once and expose a frozen typed configuration.
-- Mark the module server-only.
-- Normalize the API base URL by removing the trailing slash.
-- Never include secrets in thrown messages.
+- Authorization, public routes, body encoding, ETags, request IDs, and 204 are
+  covered.
+- Absolute, traversal, encoded traversal, backslash, and protocol-relative paths
+  are rejected.
+- Protected CMS paths cannot be made unauthenticated.
+- Structured, non-JSON, timeout, network, and missing-session failures normalize
+  safely.
 
 Tests:
 
-- Valid production URL and local URL are accepted.
-- Missing URL, invalid protocol, short session secret, malformed account entry,
-  duplicate actor ID, and invalid timeout are rejected.
-- Error messages do not contain supplied secrets.
+- `test/api.test.ts`
 
-### AD-102 Parse and authenticate CMS accounts
+## 10. Phase 2: Content Management — Implemented
 
-Files:
+Backend mapping:
 
-- `src/lib/auth/accounts.ts`
+| UI action | Request |
+| --- | --- |
+| List/filter | `GET /api/v1/cms/content` |
+| Create | `POST /api/v1/cms/content` |
+| Detail | `GET /api/v1/cms/content/{id}` |
+| Edit | `PATCH /api/v1/cms/content/{id}` with `If-Match` |
+| Delete leaf | `DELETE /api/v1/cms/content/{id}` |
+| Resolved preview | `GET /api/v1/mw/content/{id}` |
 
-Implementation:
-
-- Parse `CMS_API_KEYS` into `{ actorId, role, secret }` records.
-- Accept backend roles syntactically, but permit dashboard login only for
-  `editor` and `admin`.
-- Trim actor IDs and roles; do not trim secrets after parsing.
-- Compare submitted secrets with `crypto.timingSafeEqual` using equal-length
-  buffers.
-- Return the same authentication failure for unknown actor, wrong secret, and
-  disallowed role.
-
-Tests:
-
-- Editor and admin authenticate.
-- Reader, unknown actor, wrong secret, blank fields, and malformed entries fail.
-- Authentication does not reveal which credential was invalid.
-
-### AD-103 Implement signed sessions
+### AD-201 Content model and form mapping
 
 Files:
 
-- `src/lib/auth/session.ts`
-- `src/lib/auth/guards.ts`
-
-Implementation:
-
-- Store `{ actorId, expiresAt }` in an HMAC-SHA-256-signed cookie.
-- Use cookie name `saatcms_dashboard_session`.
-- Set `HttpOnly`, `SameSite=Lax`, `Path=/`, eight-hour expiry, and `Secure` in
-  production.
-- Resolve the actor and current role from `CMS_API_KEYS` on every protected
-  request; never store the bearer secret in the cookie.
-- Reject expired, malformed, tampered, or removed-account sessions.
-- `requireSession()` redirects page requests to `/login` and returns an
-  authentication action error for mutations.
-
-Tests:
-
-- Valid session round-trip.
-- Expired and tampered cookies fail.
-- Removing an actor from the parsed account set invalidates the session.
-- Cookie options match production and development expectations.
-
-### AD-104 Implement login and logout
-
-Files:
-
-- `src/app/(auth)/login/page.tsx`
-- `src/features/auth/login-form.tsx`
-- `src/features/auth/actions.ts`
-
-Implementation:
-
-- Login accepts actor ID and secret.
-- Return one generic invalid-credentials message.
-- On success create the session and redirect to `/dashboard`.
-- Logout clears the cookie and redirects to `/login`.
-- A signed-in visitor opening `/login` redirects to `/dashboard`.
-- Disable repeated submit while pending.
-
-Tests:
-
-- Required field messages.
-- Invalid login creates no cookie.
-- Valid login creates a cookie and redirects.
-- Logout clears the cookie.
-- Protected dashboard layout rejects an unauthenticated request.
-
-### AD-105 Implement the SaatCMS API client
-
-Files:
-
-- `src/lib/api/client.ts`
-- `src/lib/api/errors.ts`
-- `src/lib/api/response.ts`
-- `src/lib/api/types.ts`
-
-Implementation:
-
-- Accept relative backend paths only; reject absolute request URLs.
-- Resolve the current session account and attach its bearer secret to CMS
-  calls.
-- Allow unauthenticated server calls only for `/`, `/health`, `/ready`, and
-  `/api/v1/mw/*`.
-- Set `Accept: application/json`; set `Content-Type` only when sending JSON.
-- Forward `If-Match` when provided.
-- Capture `ETag` and `X-Request-Id` response headers.
-- Use `AbortController` and the configured timeout.
-- Parse successful empty `204` responses without attempting JSON parsing.
-- Normalize all non-2xx responses to `SaatCmsApiError`.
-- Never log request authorization headers or request bodies containing
-  playback URLs.
-
-Tests:
-
-- Builds the live and local base URLs correctly.
-- Adds the correct editor/admin bearer credential.
-- Does not add authorization to public health or middleware reads.
-- Sends JSON and `If-Match` correctly.
-- Parses `200`, `201`, and `204`.
-- Captures ETag and request ID.
-- Maps JSON errors, non-JSON errors, network errors, and timeouts safely.
-- Rejects absolute URLs and path traversal attempts.
-
-## 10. Phase 2 - Content Management
-
-### Content API mapping
-
-| Operation | Backend request                                                  |
-| --------- | ---------------------------------------------------------------- |
-| List      | `GET /api/v1/cms/content?type=&parentId=&title=&page=&pageSize=` |
-| Create    | `POST /api/v1/cms/content`                                       |
-| Get       | `GET /api/v1/cms/content/{id}`                                   |
-| Update    | `PATCH /api/v1/cms/content/{id}` with optional `If-Match`        |
-| Delete    | `DELETE /api/v1/cms/content/{id}`                                |
-| Resolve   | `GET /api/v1/mw/content/{id}`                                    |
-
-### AD-201 Define Content types and validation
-
-Files:
-
-- `src/features/content/content-types.ts`
-- `src/features/content/content-validation.ts`
-
-Implementation rules:
-
-- Type is one of `SERIES`, `SEASON`, `EPISODE`, `MOVIE`.
-- Quality is `SD`, `HD`, `UHD_4K`, or `null`.
-- Series and Movie submit `parentId: null`.
-- Season requires a Series parent.
-- Episode requires a Season parent.
-- Title must be non-empty after trimming.
-- Nullable metadata uses an explicit "Inherit" control that submits `null`.
-- `isPremium` supports `inherit`, `yes`, and `no`; explicit `false` must not be
-  converted to `null`.
-- Country codes are uppercased, deduplicated, and validated as two letters.
-- When geo override is false, omit `geoBlockCountries` from the request.
-- When geo override is true, submit the array even when it is empty.
-- Content type is immutable on edit.
-
-Tests:
-
-- Every hierarchy combination.
-- `false` premium override remains false.
-- Empty geo override list is preserved.
-- Invalid quality, country, title, and parent are rejected.
-- Create and patch mappers include only allowed fields.
-
-### AD-202 Build the Content list
-
-Files:
-
-- `src/app/(dashboard)/content/page.tsx`
-- `src/features/content/content-table.tsx`
-
-Implementation:
-
-- URL parameters: `title`, `type`, `parentId`, `page`, `pageSize`.
-- Submit filters through GET navigation.
-- Show columns: title, type, parent ID, quality, premium state, updated time,
-  and actions.
-- Link each row to `/content/[id]`.
-- Provide clear loading, empty, backend unavailable, and pagination states.
-- Add a `Create Content` action linking to `/content/new`.
+- `lib/content/model.ts`
+- `components/content/content-form.tsx`
+- `components/content/parent-search.tsx`
 
 Acceptance criteria:
 
-- Refreshing or sharing the URL preserves the list state.
-- No unbounded client-side data download occurs.
-- Clearing filters returns to page 1.
+- Support `SERIES`, `SEASON`, `EPISODE`, and `MOVIE`.
+- Season requires a Series parent; Episode requires a Season parent.
+- Series/Movie cannot retain a parent.
+- Blank inheritable fields map to `null`.
+- Premium supports inherit, explicit true, and explicit false.
+- Geo override distinguishes inherit from an explicit empty list.
+- Protected playback URL remains a CMS-only field.
 
-Tests:
-
-- Search parameter parsing and backend query construction.
-- Filter values render from the URL.
-- Empty and populated table states.
-- Pagination links preserve filters.
-- API error state displays code/message and retry link.
-
-### AD-203 Build create/edit Content forms
+### AD-202 Content list and detail workflows
 
 Files:
 
-- `src/app/(dashboard)/content/new/page.tsx`
-- `src/features/content/content-form.tsx`
-- `src/features/content/actions.ts`
+- `app/(dashboard)/content/page.tsx`
+- `app/(dashboard)/content/new/page.tsx`
+- `app/(dashboard)/content/[id]/page.tsx`
+- `lib/content/actions.ts`
+- `components/content/metadata-preview.tsx`
+- `components/content/delete-content.tsx`
 
-Implementation:
+Acceptance criteria:
 
-- Fields: type, title, parent, parental rating, genre, quality, premium,
-  playback URL, geo override, and country list.
-- Load parent choices from filtered Content list calls:
-  `type=SERIES&pageSize=100` for Season and `type=SEASON&pageSize=100` for
-  Episode.
-- If more than 100 eligible parents exist, provide server-filtered parent
-  search instead of silently truncating choices.
-- Hide parent selection for Series and Movie.
-- Switching type clears an incompatible parent.
-- On successful create, redirect to the new detail page and show success state.
-- Preserve submitted values when validation or backend errors occur.
+- URL-backed title/type/parent/page/page-size filtering.
+- Backend pagination totals drive navigation.
+- Parent search remains backend-bounded and accepts an exact ID.
+- Detail reads preserve ETag and compare raw overrides with resolved metadata.
+- Patch forwards `If-Match`; conflicts require user recovery.
+- Delete requires explicit confirmation and refuses recursive parent deletion.
 
 Tests:
 
-- Correct fields for each content type.
-- Parent field resets when type changes.
-- Inheritance controls map to `null`.
-- Geo override toggling preserves an intentional empty override.
-- Successful and failed create actions.
+- `lib/content/model.test.ts`
+- `lib/content/actions.test.ts`
+- `components/content/content-form.test.tsx`
+- `components/content/parent-search.test.tsx`
+- `components/content/metadata-preview.test.tsx`
+- `components/content/delete-content.test.tsx`
 
-### AD-204 Build Content detail and update
+## 11. Phase 3: Channels and EPG — Implemented
+
+Channel mapping:
+
+| UI action | Request |
+| --- | --- |
+| List/filter | `GET /api/v1/cms/channels` |
+| Create | `POST /api/v1/cms/channels` |
+| Detail | `GET /api/v1/cms/channels/{channelId}` |
+| Edit | `PATCH /api/v1/cms/channels/{channelId}` with `If-Match` |
+| Delete | `DELETE /api/v1/cms/channels/{channelId}?confirm=true` |
+
+### AD-301 Channel workflows
 
 Files:
 
-- `src/app/(dashboard)/content/[id]/page.tsx`
-- reuse `content-form.tsx` and `actions.ts`
+- `app/(dashboard)/channels/page.tsx`
+- `app/(dashboard)/channels/new/page.tsx`
+- `app/(dashboard)/channels/[channelId]/page.tsx`
+- `components/channels/actions.ts`
+- `components/channels/channel-form.tsx`
+- `components/channels/delete-channel-form.tsx`
 
-Implementation:
+Acceptance criteria:
 
-- Fetch the raw CMS record and public resolved metadata in parallel.
-- Show identity, hierarchy, raw override values, resolved values, timestamps,
-  and playback URL only in the authenticated CMS section.
-- Do not expect `playbackUrl` from the public metadata response.
-- Store the CMS GET ETag in a hidden update field.
-- PATCH only mutable fields and send `If-Match`.
-- On `CONTENT_WRITE_CONFLICT`, keep the submitted values and show `Reload latest
-version`; do not auto-resubmit.
-
-Tests:
-
-- Raw and resolved metadata remain visually distinguishable.
-- Public metadata without playback URL renders normally.
-- Update forwards ETag.
-- Conflict state offers refresh without losing the user's submitted values.
-- Missing Content renders the not-found state.
-
-### AD-205 Implement Content deletion
-
-Implementation:
-
-- Require a confirmation dialog containing the Content title.
-- Delete only after explicit confirmation.
-- On success redirect to `/content`.
-- On `CONTENT_HAS_CHILDREN`, explain that child records must be removed first.
-- Do not offer recursive deletion.
+- URL-backed name/slug/page/page-size filters.
+- Create/edit validation preserves entered data on failure.
+- Edit forwards the latest ETag.
+- Delete requires the current slug, explains EPG cascade, and sends
+  `confirm=true`.
+- Editor/admin share controls; backend `CMS_FORBIDDEN` remains authoritative.
 
 Tests:
 
-- Cancel performs no request.
-- Confirm performs one delete request.
-- Leaf success redirects.
-- `CONTENT_HAS_CHILDREN`, forbidden, and not-found errors render correctly.
+- `components/channels/actions.test.ts`
+- `components/channels/channel-forms.test.tsx`
 
-Phase 2 exit criteria:
+EPG mapping:
 
-- All Content CMS operations are available through the dashboard.
-- Hierarchy, nullable inheritance, empty geo override, ETag, and leaf deletion
-  rules are covered by Vitest.
+| UI action | Request |
+| --- | --- |
+| Day schedule | `GET /api/v1/cms/channels/{channelId}/epg` with UTC window |
+| Create | `POST /api/v1/cms/channels/{channelId}/epg` |
+| Detail | `GET /api/v1/cms/channels/{channelId}/epg/{programId}` |
+| Edit | `PATCH /api/v1/cms/channels/{channelId}/epg/{programId}` with `If-Match` |
+| Delete | `DELETE /api/v1/cms/channels/{channelId}/epg/{programId}` |
 
-## 11. Phase 3 - Live Channel Management
-
-### Channel API mapping
-
-| Operation | Backend request                                          |
-| --------- | -------------------------------------------------------- |
-| List      | `GET /api/v1/cms/channels?name=&slug=&page=&pageSize=`   |
-| Create    | `POST /api/v1/cms/channels`                              |
-| Get       | `GET /api/v1/cms/channels/{channelId}`                   |
-| Update    | `PATCH /api/v1/cms/channels/{channelId}` with `If-Match` |
-| Delete    | `DELETE /api/v1/cms/channels/{channelId}?confirm=true`   |
-
-### AD-301 Build Channel list
-
-Implementation:
-
-- URL parameters: `name`, `slug`, `page`, `pageSize`.
-- Show name, slug, updated time, EPG link, and edit link.
-- Use backend pagination and filtering.
-
-Tests:
-
-- Query parameter mapping.
-- Populated, empty, and error states.
-- Pagination preserves name and slug filters.
-
-### AD-302 Build Channel create/edit
-
-Implementation:
-
-- Create route: `/channels/new`.
-- Detail/edit route: `/channels/[channelId]`.
-- Fields: name and slug.
-- Lowercase slug input as the user types and validate single-hyphen segments.
-- Capture ETag on detail read and forward it on PATCH.
-- Provide an EPG button linking to the channel schedule.
-
-Tests:
-
-- Name/slug required validation.
-- Slug normalization and invalid slug cases.
-- Duplicate slug error.
-- ETag forwarding and `LIVE_CHANNEL_WRITE_CONFLICT` recovery.
-
-### AD-303 Implement Channel deletion
-
-Implementation:
-
-- Render the action for both editor and admin users; do not create a separate
-  role-specific layout.
-- Confirmation text must state that all EPG programs will be deleted.
-- Require the user to type the channel slug before enabling confirmation.
-- Send `confirm=true` exactly.
-- Admin success redirects to `/channels`.
-- Editor `CMS_FORBIDDEN` remains on the page with a clear message.
-
-Tests:
-
-- Incorrect typed slug keeps confirm disabled.
-- Confirm sends `confirm=true`.
-- Admin success, editor forbidden, missing confirmation, and not-found states.
-
-Phase 3 exit criteria:
-
-- Channel list, create, update, schedule navigation, and guarded deletion work.
-- The frontend does not pretend editors can bypass backend authorization.
-
-## 12. Phase 4 - Simple EPG Schedule
-
-### EPG API mapping
-
-| Operation | Backend request                                                                    |
-| --------- | ---------------------------------------------------------------------------------- |
-| List      | `GET /api/v1/cms/channels/{channelId}/epg?windowStart=&windowEnd=&page=&pageSize=` |
-| Create    | `POST /api/v1/cms/channels/{channelId}/epg`                                        |
-| Get       | `GET /api/v1/cms/channels/{channelId}/epg/{programId}`                             |
-| Update    | `PATCH /api/v1/cms/channels/{channelId}/epg/{programId}` with `If-Match`           |
-| Delete    | `DELETE /api/v1/cms/channels/{channelId}/epg/{programId}`                          |
-
-### AD-401 Implement EPG day-window utilities
+### AD-302 EPG time and CRUD workflows
 
 Files:
 
-- `src/features/epg/time.ts`
-- `src/features/epg/epg-validation.ts`
+- `app/(dashboard)/epg/page.tsx`
+- `app/(dashboard)/channels/[channelId]/epg/page.tsx`
+- `app/(dashboard)/channels/[channelId]/epg/new/page.tsx`
+- `app/(dashboard)/channels/[channelId]/epg/[programId]/edit/page.tsx`
+- `components/epg/time.ts`
+- `components/epg/actions.ts`
+- EPG components under `components/epg/`
 
-Implementation:
+Acceptance criteria:
 
-- The `date=YYYY-MM-DD` URL parameter represents a day in the browser's local
-  timezone.
-- A small client boundary calculates local day start/end and navigates with
-  explicit `windowStart` and `windowEnd` ISO values.
-- The server validates both values as timezone-aware instants before calling
-  the backend.
-- Display program times in the browser's local timezone and show the UTC value
-  in secondary text or a tooltip.
-- Forms use `datetime-local`; convert to ISO with `new Date(value).toISOString()`
-  before submission.
-- Reject invalid dates and `startTime >= endTime` locally while retaining
-  backend validation as authoritative.
-
-Tests:
-
-- Day boundary conversion in positive and negative UTC offsets.
-- Daylight-saving transition behavior using fixed test timezones.
-- Back-to-back time ranges validate.
-- Equal, reversed, and invalid times fail.
-- ISO serialization includes timezone information.
-
-### AD-402 Build the schedule page
-
-Files:
-
-- `src/app/(dashboard)/channels/[channelId]/epg/page.tsx`
-- `src/features/epg/epg-schedule.tsx`
-
-Implementation:
-
-- Fetch Channel detail and the selected EPG window in parallel.
-- Provide previous day, today, next day, and date picker controls.
-- Render a chronological list with start, end, duration, program name, and
-  actions.
-- Show overlaps only as backend errors; never visually accept a failed write.
-- Use page size 100 for a single-day window and retain pagination if total
-  exceeds 100.
-- Provide an empty schedule state with `Add program` action.
+- A local date maps to exact local-midnight boundaries serialized as UTC.
+- Invalid date/window input falls back safely.
+- Schedule includes programs intersecting the selected day and orders them by
+  start time.
+- Channel selector, previous/today/next navigation, and date input preserve the
+  correct UTC window.
+- Forms display local values and submit ISO UTC instants.
+- Channel ID is route-scoped, not editable form data.
+- Edit forwards ETag; overlap/conflict errors preserve values.
+- Delete requires browser confirmation.
 
 Tests:
 
-- Requests include required window parameters.
-- Programs render in chronological order.
-- Navigation generates the correct window.
-- Empty, paginated, missing-channel, and backend-error states.
+- `components/epg/time.test.ts`
+- `components/epg/actions.test.ts`
+- `components/epg/epg-components.test.tsx`
 
-### AD-403 Build EPG create/edit/delete flows
+## 12. Phase 4: Overview and Tools — Implemented
 
-Files:
+### AD-401 Overview
 
-- `src/features/epg/epg-form.tsx`
-- `src/features/epg/actions.ts`
+File: `app/(dashboard)/dashboard/page.tsx`
 
-Implementation:
-
-- Use a dialog or dedicated panel with program name, start, and end.
-- Create uses the channel from the route; channel movement is not supported.
-- Edit fetches the program and ETag before showing the form.
-- Patch sends only changed fields and the ETag.
-- Delete requires a confirmation dialog and preserves the channel lock.
-- After success, revalidate the schedule page without changing the window.
-- Map `EPG_OVERLAP`, `INVALID_TIME_RANGE`, `INVALID_DATE_TIME_FORMAT`,
-  `EPG_WRITE_CONFLICT`, and `EPG_PROGRAM_NOT_FOUND` to specific UI messages.
-
-Tests:
-
-- Create request mapping and successful refresh.
-- Back-to-back programs are not blocked by frontend validation.
-- Overlap response keeps the dialog open with entered values.
-- Edit excludes channel ID and forwards ETag.
-- Conflict provides reload-latest behavior.
-- Delete cancel/success/not-found behavior.
-
-Phase 4 exit criteria:
-
-- All EPG endpoints are usable from one channel-scoped chronological schedule.
-- Timezone conversion, boundary validity, overlap errors, and ETags are tested.
-
-## 13. Phase 5 - Overview, System, and Middleware Tools
-
-### AD-501 Build Overview
-
-Implementation:
+Behavior:
 
 - Fetch `/health`, `/ready`, Content `pageSize=1`, and Channel `pageSize=1` in
   parallel.
-- Fetch four Content totals using the type filters for Series, Season, Episode,
-  and Movie.
-- Show cards for backend state, database readiness, total Content, total
-  Channels, and type counts.
-- Add quick links for new Content, new Channel, EPG, and Playback Tester.
-- Do not claim to show traffic, user, revenue, playback, or audit analytics.
-- An upcoming EPG preview is optional and bounded to the first three channels
-  and next 24 hours; omit it if it makes the overview noticeably slower.
+- Use `PageResponse.total`, not item count, for totals.
+- Keep successful cards visible when a sibling request fails.
+- Provide quick links for catalog, channels, and playback.
+- Do not claim analytics or an EPG preview.
 
-Tests:
+### AD-402 System status
 
-- Totals map from `PageResponse.total`, not `items.length`.
-- Partial upstream failure leaves successful cards visible.
-- Readiness `503` shows not ready rather than a generic crash.
+File: `app/(dashboard)/system/page.tsx`
 
-### AD-502 Build System page
+Behavior:
 
-Implementation:
+- Show configured backend host, liveness, and readiness.
+- Never show credentials or raw environment values beyond the safe host.
+- Render liveness and readiness failures independently.
 
-- Show configured backend origin, never credentials.
-- Fetch `/`, `/health`, and `/ready` with no-store behavior.
-- Display last checked time and a manual refresh control.
-- Show request ID for failures when available.
-
-Tests:
-
-- Ready, not-ready, timeout, and malformed upstream response states.
-- Secret values never appear in rendered output.
-
-### AD-503 Build Metadata Resolver
-
-Implementation:
-
-- Accept a Content ID and call `GET /api/v1/mw/content/{id}` server-side.
-- Display type, title, rating, genre, quality, premium, and blocked countries.
-- Explicitly do not display or expect `playbackUrl`.
-- Link to the CMS Content detail when the same ID exists.
-
-Tests:
-
-- Successful resolution.
-- Empty geo list.
-- Missing Content.
-- A defensive test proves a stray `playbackUrl` is not rendered.
-
-### AD-504 Build Playback Tester
+### AD-403 Metadata Resolver
 
 Files:
 
-- `src/app/(dashboard)/tools/playback/page.tsx`
-- `src/features/tools/playback-form.tsx`
-- `src/features/tools/playback-action.ts`
+- `app/(dashboard)/tools/metadata/page.tsx`
+- `app/(dashboard)/tools/metadata/actions.ts`
+- `app/(dashboard)/tools/metadata/metadata-form.tsx`
 
-Implementation:
+Behavior:
 
-- Fields: Content ID, User ID, two-letter country, and device.
-- Device is a select with `Mobile`, `SmartTV`, and `Web`.
-- Normalize country to uppercase; do not normalize device casing.
-- Server Action calls the public playback endpoint with `X-User-Id`,
-  `X-User-Country`, and `X-Device-Type`.
-- Success displays request context, resolved metadata, and playback URL.
-- Failure displays status, error code, message, and request ID without fabricating
-  metadata or playback details.
-- Keep previous form values so reviewers can quickly switch country/device.
+- Call `GET /api/v1/mw/content/{id}` server-side.
+- Display resolved metadata without rendering a stray playback URL.
+- Preserve safe structured errors and request IDs.
 
-Tests:
+### AD-404 Playback Tester
 
-- Header mapping and country normalization.
-- Allowed playback response.
-- `GEO_BLOCKED` and `DEVICE_NOT_SUPPORTED` do not render playback URL.
-- Missing header validation, invalid country, invalid device, missing Content,
-  timeout, and unavailable backend.
+Files:
 
-Phase 5 exit criteria:
+- `app/(dashboard)/tools/playback/page.tsx`
+- `app/(dashboard)/tools/playback/actions.ts`
+- `app/(dashboard)/tools/playback/playback-form.tsx`
 
-- Dashboard summaries use only existing bounded API calls.
-- Health/readiness and both middleware tools are complete.
-- Playback success and protected failure behavior are covered by Vitest.
+Behavior:
 
-## 14. Phase 6 - Hardening and Deployment
-
-### AD-601 Failure, loading, and conflict consistency
-
-- Use route-level `loading.tsx` for initial screen loads.
-- Add route-level `error.tsx` with retry for unexpected failures.
-- Provide explicit empty states for Content, Channels, and EPG.
-- Map `401` to session revalidation; if the account no longer exists, clear the
-  dashboard session and redirect to login.
-- Display `403`, `404`, `409`, `429`, and `503` using shared error presentation.
-- For `429`, preserve form state and allow manual retry; do not automatically
-  repeat mutations.
-- For write conflicts, never silently overwrite or automatically resubmit.
-
-### AD-602 Security and caching
-
-- Confirm no environment secret is imported into a Client Component.
-- Add `Cache-Control: no-store` to authentication and sensitive responses.
-- Validate same-origin mutation requests where Next.js does not do so
-  automatically.
-- Avoid rendering bearer tokens in React props, HTML, logs, errors, or source
-  maps.
-- Add production security headers appropriate for a self-hosted Next.js app.
-- Redact credentials from server logging and test snapshots.
+- Accept Content ID, user ID, two-letter country, and device.
+- Normalize country to uppercase.
+- Send `X-User-Id`, `X-User-Country`, and `X-Device-Type` server-side.
+- Display playback URL only for successful allowed responses.
+- Preserve input and show safe status/code/message/request ID on failure.
 
 Tests:
 
-- Client-rendered output contains no known test secret.
-- Mutation with an invalid Origin is rejected.
-- Sensitive responses are not cacheable.
-- Session invalidation after key rotation redirects to login.
+- `app/(dashboard)/tools/metadata/actions.test.ts`
+- `app/(dashboard)/tools/metadata/metadata-form.test.tsx`
+- `app/(dashboard)/tools/playback/actions.test.ts`
+- `app/(dashboard)/tools/playback/playback-form.test.tsx`
+- `components/app-shell.test.tsx`
+- `test/components.test.tsx`
 
-### AD-603 Final verification matrix
+## 13. Phase 5: Hardening and Release — Local Work Implemented
+
+### AD-501 Failure and security consistency
+
+Implemented:
+
+- Shared route loading and unexpected-error boundaries.
+- Explicit empty/API error states across CMS and EPG screens.
+- Manual conflict recovery; no automatic mutation replay.
+- Safe public-route allowlist and path validation.
+- No-store upstream requests.
+- `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and
+  `Permissions-Policy` headers.
+- CI uses placeholder credentials only.
+
+### AD-502 Automated quality gates
 
 Required commands:
 
-```bash
-npm run lint
+```powershell
 npm run typecheck
-npm test
+npm run lint
 npm run test:coverage
 npm run build
+npm audit --omit=dev
 ```
 
-Required reviewer journeys against the deployed backend:
+`.github/workflows/ci.yml` runs the same gates on pull requests and pushes to
+`main`. Tests mock `fetch`; normal Vitest execution must never call the live
+backend.
+
+### AD-503 Render Blueprint — Configured, Not Deployed
+
+`render.yaml` declares:
+
+- Node web service `saatcms-admin-dashboard`
+- Free plan
+- Node `22.13.0`
+- Build `npm ci && npm run build`
+- Start `npm run start`
+- Health check `/login`
+- Live backend origin
+- Prompted `CMS_API_KEYS`
+- Generated `DASHBOARD_SESSION_SECRET`
+- 30-second upstream timeout
+
+Remaining release steps:
+
+1. Connect the repository as a Render Blueprint.
+2. Enter the same editor/admin `CMS_API_KEYS` entries used by the backend.
+3. Deploy and confirm `/login` is healthy.
+4. Run the manual reviewer matrix below with disposable records.
+5. Check browser storage, rendered markup, logs, and error output for secrets.
+6. Record the deployed URL and release result after verification.
+
+## 14. Manual Deployed Smoke Matrix
 
 1. Editor login and logout.
-2. Content filter, create, edit, resolved preview, and leaf delete.
-3. Channel create and edit.
-4. Editor attempts channel deletion and receives the expected forbidden result.
-5. Admin deletes a disposable Channel with explicit confirmation.
-6. EPG create, back-to-back create, overlap rejection, edit, and delete.
-7. Metadata resolution.
-8. Allowed playback.
-9. Geo-blocked playback.
-10. Device-blocked playback.
-11. Backend not-ready/unavailable presentation.
+2. Invalid login remains generic.
+3. Overview and System show live status.
+4. Content filter, create, edit, resolved preview, conflict handling, and leaf
+   delete.
+5. Channel create and edit.
+6. Editor Channel delete receives the backend forbidden response.
+7. Admin deletes a disposable Channel using typed slug confirmation.
+8. EPG create, adjacent create, overlap rejection, edit, and delete.
+9. Metadata resolution success and missing Content.
+10. Playback allowed, geo-blocked, and device-blocked cases.
+11. Backend cold-start/timeout/unavailable presentation.
 
-### AD-604 Render deployment
+Do not run destructive checks against non-disposable records.
 
-Implementation:
+## 15. Credential Rotation and Rollback
 
-- Create a separate Render web service for the dashboard.
-- Configure `SAATCMS_API_BASE_URL` with the live backend URL.
-- Configure `CMS_API_KEYS` and `DASHBOARD_SESSION_SECRET` through Render secrets
-  or a shared environment group.
-- Use `npm run build` and `npm start`.
-- Add a simple dashboard health route only if Render requires one; it must not
-  call protected backend routes or reveal configuration.
-- Verify that backend cold starts produce a pending state and then either data
-  or a retryable timeout message.
+CMS credential rotation:
 
-Acceptance criteria:
+1. Prepare the replacement editor/admin entries.
+2. Update the backend `CMS_API_KEYS`.
+3. Immediately update the dashboard `CMS_API_KEYS` with the matching value.
+4. Deploy both services.
+5. Verify a new login and one authenticated read for each required actor.
+6. Remove obsolete values only after the new path is confirmed.
 
-- The deployed browser bundle contains no CMS secrets.
-- Editor and admin accounts can authenticate.
-- Dashboard-to-backend calls succeed without a backend CORS change.
-- All reviewer journeys pass using disposable records.
+Session-secret rotation:
 
-## 15. Vitest Test Inventory
+- Change only `DASHBOARD_SESSION_SECRET` on the dashboard.
+- Expect every existing dashboard session to become invalid.
+- Verify a new login after deployment.
 
-Minimum named test files:
+Rollback:
 
-```text
-src/lib/env/server-env.test.ts
-src/lib/auth/accounts.test.ts
-src/lib/auth/session.test.ts
-src/lib/api/client.test.ts
-src/lib/api/errors.test.ts
-src/lib/urls/search-params.test.ts
-src/features/auth/login-form.test.tsx
-src/features/content/content-validation.test.ts
-src/features/content/content-form.test.tsx
-src/features/content/content-table.test.tsx
-src/features/channels/channel-validation.test.ts
-src/features/channels/channel-form.test.tsx
-src/features/epg/time.test.ts
-src/features/epg/epg-form.test.tsx
-src/features/epg/epg-schedule.test.tsx
-src/features/tools/playback-form.test.tsx
-src/features/overview/overview-data.test.ts
-```
+- Restore the last known-good dashboard deploy through Render.
+- Do not roll back the backend unless the incident originated there.
+- If credentials changed, restore a matching `CMS_API_KEYS` value on both
+  services before retesting.
+- Never commit current or previous secrets to document the rollback.
 
-Mocking rules:
+## 16. Delivery and Git Boundaries
 
-- Unit tests must not call the live Render backend.
-- Mock `fetch` at the server API client boundary.
-- Use shared response factories for documented success and error shapes.
-- Keep one optional, manually invoked smoke script for the live backend; do not
-  run it as part of normal Vitest execution.
-- Do not place real credentials in fixtures, snapshots, or CI variables used by
-  untrusted pull requests.
+Recommended cohesive commit boundaries for the initial release:
 
-## 16. Phase Dependencies and Delivery Order
+1. Runtime, environment, authentication, API client, and base tests.
+2. Application shell, overview, system, and middleware tools.
+3. Content management and its tests.
+4. Channel/EPG management and their tests.
+5. CI, Render configuration, quality hardening, and documentation.
 
-```text
-Phase 0 Foundation
-  -> Phase 1 Auth and API client
-       -> Phase 2 Content
-       -> Phase 3 Channels
-            -> Phase 4 EPG
-       -> Phase 5 Overview and tools
-            -> Phase 6 Hardening and deployment
-```
+Each commit should remain buildable in sequence where practical and must avoid
+unrelated generated output or real environment files. Merge the completed
+feature branch to `main` only after the full quality gate passes. Pushing and
+external deployment remain separate explicit actions.
 
-Recommended pull request boundaries:
+## 17. Definition of Done
 
-1. `foundation-and-test-harness`
-2. `dashboard-auth-and-api-client`
-3. `content-management`
-4. `channel-management`
-5. `epg-schedule`
-6. `overview-system-and-tools`
-7. `hardening-and-render-deployment`
+Implementation complete:
 
-Each pull request must include its relevant tests and documentation updates. Do
-not postpone all testing to Phase 6.
+- All documented routes and backend workflows are present.
+- Editor/admin sessions and server-only credentials behave as specified.
+- ETag, inheritance, deletion, time conversion, overlap, and playback failure
+  semantics are tested.
+- Typecheck, lint, coverage, build, and production audit pass.
+- CI, Render Blueprint, README, and operational procedures are present.
 
-## 17. First-Release Definition of Done
+Release complete:
 
-- Every documented dashboard route is implemented.
-- Editor and admin accounts authenticate through environment-managed backend
-  credentials.
-- CMS credentials never reach browser JavaScript or storage.
-- Content, Channel, and EPG CRUD use the current backend contracts.
-- All edits preserve ETag/If-Match conflict handling.
-- Content inheritance and geo override controls map correctly to nullable API
-  fields.
-- The EPG schedule handles timezone-aware day windows and back-to-back programs.
-- The Playback Tester demonstrates allowed, geo-blocked, and device-blocked
-  behavior.
-- Health/readiness and partial backend failure states are visible.
-- Vitest, typecheck, lint, coverage, and production build pass.
-- The dashboard is deployed separately from the backend and communicates with
-  the live Render service using server-only requests.
-- Datadog and analytics remain intentionally deferred.
+- Render dashboard service exists and reports healthy.
+- Deployed browser/log checks show no credential exposure.
+- Editor and admin authentication works.
+- The manual smoke matrix passes against the live backend.
+- Deployment URL and release result are documented.
+
+Datadog and analytics remain intentionally deferred.
