@@ -144,8 +144,8 @@ describe("EPG navigation and schedule", () => {
         channels={channels}
         channelId="channel-1"
         date="2026-07-13"
-        windowStart="2026-07-13T00:00:00.000Z"
-        windowEnd="2026-07-14T00:00:00.000Z"
+        windowStart="2000-01-01T00:00:00.000Z"
+        windowEnd="2000-01-02T00:00:00.000Z"
       />,
     );
 
