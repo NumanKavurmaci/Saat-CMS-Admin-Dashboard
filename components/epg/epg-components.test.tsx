@@ -138,7 +138,7 @@ describe("EPG navigation and schedule", () => {
     expect(mocks.push).toHaveBeenLastCalledWith(expectedSchedulePath("channel/two", "2026-07-13"));
   });
 
-  it("replaces stale window parameters with the selected local day window", () => {
+  it("replaces stale window parameters with the selected local day window", async () => {
     render(
       <EpgNavigation
         channels={channels}
@@ -149,7 +149,9 @@ describe("EPG navigation and schedule", () => {
       />,
     );
 
-    expect(mocks.replace).toHaveBeenCalledWith(expectedSchedulePath("channel-1", "2026-07-13"));
+    await waitFor(() => {
+      expect(mocks.replace).toHaveBeenCalledWith(expectedSchedulePath("channel-1", "2026-07-13"));
+    });
   });
 
   it("shows an empty state and otherwise sorts programs chronologically", () => {
