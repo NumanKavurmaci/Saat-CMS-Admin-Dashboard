@@ -47,12 +47,14 @@ export default async function LoginPage() {
         <div className="w-full max-w-md">
           <div className="mb-10 lg:hidden"><BrandMark /></div>
           <div className="panel rounded-3xl p-6 sm:p-8">
-            <div className="inline-flex rounded-full border border-blue-400/15 bg-blue-400/8 px-3 py-1 text-xs font-medium text-blue-200">Protected workspace</div>
+            <div className="inline-flex rounded-full border border-blue-400/15 bg-blue-400/8 px-3 py-1 text-xs font-medium text-blue-200">Secure workspace</div>
             <h2 className="mt-5 text-3xl font-semibold tracking-[-0.035em] text-white">Welcome back</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-400">Use the editor or admin credentials configured for this dashboard environment.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">Sign in to manage CMS resources, or continue as a visitor to explore public middleware tools.</p>
             <LoginForm />
           </div>
-          <p className="mt-5 text-center text-xs leading-5 text-slate-600">Your CMS key is verified on the server and is never stored in the browser.</p>
+          <p className="mt-5 text-center text-xs leading-5 text-slate-600">
+            CMS keys are verified only on the server; visitor requests use no bearer credential.
+          </p>
         </div>
       </section>
     </main>

@@ -10,6 +10,7 @@ import {
   Database,
   FileSearch,
   Gauge,
+  LogIn,
   LogOut,
   Menu,
   PlayCircle,
@@ -22,9 +23,9 @@ import { logoutAction } from "@/app/login/actions";
 
 const navigation = [
   { href: "/dashboard", label: "Overview", icon: Gauge },
-  { href: "/content", label: "Content", icon: Clapperboard },
-  { href: "/channels", label: "Live Channels", icon: Radio },
-  { href: "/epg", label: "EPG Schedule", icon: CalendarRange },
+  { href: "/content", label: "Content", icon: Clapperboard, cmsOnly: true },
+  { href: "/channels", label: "Live Channels", icon: Radio, cmsOnly: true },
+  { href: "/epg", label: "EPG Schedule", icon: CalendarRange, cmsOnly: true },
   { href: "/tools/metadata", label: "Metadata Resolver", icon: FileSearch },
   { href: "/tools/playback", label: "Playback Tester", icon: PlayCircle },
   { href: "/system", label: "System", icon: Database },
@@ -36,11 +37,16 @@ export function AppShell({
   children,
 }: {
   actorId: string;
-  role: "editor" | "admin";
+  role: "visitor" | "editor" | "admin";
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const visitor = role === "visitor";
+  const visibleNavigation = visitor
+    ? navigation.filter((item) => !item.cmsOnly)
+    : navigation;
+  const AccountActionIcon = visitor ? LogIn : LogOut;
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
@@ -58,7 +64,7 @@ export function AppShell({
           Workspace
         </div>
         <nav className="mt-3 space-y-1" aria-label="Primary navigation">
-          {navigation.map((item) => {
+          {visibleNavigation.map((item) => {
             const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
             const Icon = item.icon;
             return (
@@ -78,9 +84,13 @@ export function AppShell({
         <div className="mt-auto rounded-xl border border-[var(--border)] bg-[#0d192b] p-3">
           <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
             <Activity className="h-3.5 w-3.5" />
-            Secure server session
+            {visitor ? "Public visitor session" : "Secure server session"}
           </div>
-          <p className="mt-1.5 text-xs leading-5 text-slate-500">CMS credentials stay outside the browser.</p>
+          <p className="mt-1.5 text-xs leading-5 text-slate-500">
+            {visitor
+              ? "Public requests never include a CMS bearer credential."
+              : "CMS credentials stay outside the browser."}
+          </p>
         </div>
       </aside>
 
@@ -92,18 +102,22 @@ export function AppShell({
             <Menu className="h-5 w-5" />
           </button>
           <div>
-            <p className="text-xs text-slate-500">Operations workspace</p>
+            <p className="text-xs text-slate-500">{visitor ? "Public workspace" : "Operations workspace"}</p>
             <p className="text-sm font-semibold text-slate-100">SaatCMS Middleware Core</p>
           </div>
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden text-right sm:block">
-              <p className="text-sm font-semibold text-slate-100">{actorId}</p>
-              <p className="text-xs capitalize text-slate-500">{role} access</p>
+              <p className="text-sm font-semibold text-slate-100">{visitor ? "Visitor" : actorId}</p>
+              <p className="text-xs capitalize text-slate-500">{visitor ? "public access" : `${role} access`}</p>
             </div>
             <form action={logoutAction}>
-              <button className="secondary-button !min-h-9 !rounded-full !px-3" type="submit" aria-label="Sign out">
-                <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">Sign out</span>
+              <button
+                className="secondary-button !min-h-9 !rounded-full !px-3"
+                type="submit"
+                aria-label={visitor ? "Sign in" : "Sign out"}
+              >
+                <AccountActionIcon className="h-4 w-4" />
+                <span className="hidden sm:inline">{visitor ? "Sign in" : "Sign out"}</span>
               </button>
             </form>
             <ChevronDown className="hidden h-4 w-4 text-slate-600 sm:block" />

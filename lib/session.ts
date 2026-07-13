@@ -7,10 +7,28 @@ import { getServerEnv } from "@/lib/env";
 const COOKIE_NAME = "saatcms_dashboard_session";
 const SESSION_LIFETIME_MS = 8 * 60 * 60 * 1000;
 
-type SessionPayload = {
+type AccountSessionPayload = {
+  kind: "account";
   actorId: string;
   expiresAt: number;
 };
+
+type VisitorSessionPayload = {
+  kind: "visitor";
+  expiresAt: number;
+};
+
+type SessionPayload = AccountSessionPayload | VisitorSessionPayload;
+
+export type DashboardAccountSession = DashboardAccount & { kind: "account" };
+
+export type VisitorDashboardSession = {
+  kind: "visitor";
+  actorId: "visitor";
+  role: "visitor";
+};
+
+export type DashboardSession = DashboardAccountSession | VisitorDashboardSession;
 
 function toBase64Url(bytes: Uint8Array): string {
   let value = "";
@@ -66,25 +84,57 @@ async function decodeSession(value: string): Promise<SessionPayload | null> {
   if (!(await hasValidSignature(encoded, suppliedSignature))) return null;
 
   try {
-    const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(encoded))) as SessionPayload;
-    if (!payload.actorId || !Number.isFinite(payload.expiresAt) || payload.expiresAt <= Date.now()) {
+    const parsed = JSON.parse(new TextDecoder().decode(fromBase64Url(encoded))) as {
+      kind?: unknown;
+      actorId?: unknown;
+      expiresAt?: unknown;
+    };
+    if (!Number.isFinite(parsed.expiresAt) || Number(parsed.expiresAt) <= Date.now()) {
       return null;
     }
-    return payload;
+
+    if (parsed.kind === "visitor") {
+      return { kind: "visitor", expiresAt: Number(parsed.expiresAt) };
+    }
+
+    // Sessions issued before visitor access did not include a discriminator.
+    if ((parsed.kind === undefined || parsed.kind === "account") && typeof parsed.actorId === "string" && parsed.actorId) {
+      return {
+        kind: "account",
+        actorId: parsed.actorId,
+        expiresAt: Number(parsed.expiresAt),
+      };
+    }
+
+    return null;
   } catch {
     return null;
   }
 }
 
-export async function createDashboardSession(actorId: string): Promise<void> {
-  const expiresAt = Date.now() + SESSION_LIFETIME_MS;
+async function writeDashboardSession(payload: SessionPayload): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, await encodeSession({ actorId, expiresAt }), {
+  cookieStore.set(COOKIE_NAME, await encodeSession(payload), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    expires: new Date(expiresAt),
+    expires: new Date(payload.expiresAt),
+  });
+}
+
+export async function createDashboardSession(actorId: string): Promise<void> {
+  await writeDashboardSession({
+    kind: "account",
+    actorId,
+    expiresAt: Date.now() + SESSION_LIFETIME_MS,
+  });
+}
+
+export async function createVisitorDashboardSession(): Promise<void> {
+  await writeDashboardSession({
+    kind: "visitor",
+    expiresAt: Date.now() + SESSION_LIFETIME_MS,
   });
 }
 
@@ -93,17 +143,29 @@ export async function clearDashboardSession(): Promise<void> {
   cookieStore.delete(COOKIE_NAME);
 }
 
-export async function getDashboardSession(): Promise<DashboardAccount | null> {
+export async function getDashboardSession(): Promise<DashboardSession | null> {
   const cookieStore = await cookies();
   const raw = cookieStore.get(COOKIE_NAME)?.value;
   if (!raw) return null;
 
   const payload = await decodeSession(raw);
-  return payload ? getDashboardAccount(payload.actorId) : null;
+  if (!payload) return null;
+  if (payload.kind === "visitor") {
+    return { kind: "visitor", actorId: "visitor", role: "visitor" };
+  }
+
+  const account = getDashboardAccount(payload.actorId);
+  return account ? { kind: "account", ...account } : null;
 }
 
-export async function requireDashboardSession(): Promise<DashboardAccount> {
-  const account = await getDashboardSession();
-  if (!account) redirect("/login");
-  return account;
+export async function requireDashboardSession(): Promise<DashboardSession> {
+  const session = await getDashboardSession();
+  if (!session) redirect("/login");
+  return session;
+}
+
+export async function requireDashboardAccountSession(): Promise<DashboardAccountSession> {
+  const session = await requireDashboardSession();
+  if (session.kind === "visitor") redirect("/dashboard?notice=cms-account-required");
+  return session;
 }

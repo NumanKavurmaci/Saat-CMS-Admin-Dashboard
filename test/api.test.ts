@@ -23,6 +23,7 @@ describe("saatCmsRequest", () => {
     resetServerEnvForTests();
     getDashboardSession.mockReset();
     getDashboardSession.mockResolvedValue({
+      kind: "account",
       actorId: "reviewer",
       role: "editor",
       secret: "cms-secret",
@@ -60,6 +61,24 @@ describe("saatCmsRequest", () => {
       errorCode: "DASHBOARD_SESSION_REQUIRED",
       requestId: null,
     });
+  });
+
+  it("rejects visitor CMS requests before calling the backend", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    getDashboardSession.mockResolvedValue({
+      kind: "visitor",
+      actorId: "visitor",
+      role: "visitor",
+    });
+
+    await expect(saatCmsRequest("/api/v1/cms/content")).rejects.toMatchObject({
+      name: "SaatCmsApiError",
+      status: 403,
+      errorCode: "DASHBOARD_ACCOUNT_REQUIRED",
+      requestId: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("builds an authenticated request and returns response metadata", async () => {
@@ -130,6 +149,22 @@ describe("saatCmsRequest", () => {
     expect(getDashboardSession).not.toHaveBeenCalled();
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
     expect(headers.has("Authorization")).toBe(false);
+  });
+
+  it("rejects caller-provided Authorization headers instead of forwarding them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      saatCmsRequest("/health", {
+        authenticated: false,
+        headers: { authorization: "Bearer caller-controlled" },
+      }),
+    ).rejects.toThrow(
+      "Authorization headers are managed by the dashboard API client.",
+    );
+    expect(getDashboardSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("limits unauthenticated requests to declared public routes", async () => {
