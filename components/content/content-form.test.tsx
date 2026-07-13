@@ -61,4 +61,9 @@ describe("ContentForm", () => {
     expect(container.querySelector('input[name="type"]')).toHaveValue("MOVIE");
     expect(container.querySelector('input[name="etag"]')).toHaveValue('"etag"');
   });
+
+  it("returns to the content library when editing is cancelled", () => {
+    render(<ContentForm mode="edit" initialValues={formValuesFromContent()} contentId="movie-one" {...parents} />);
+    expect(screen.getByRole("link", { name: "Cancel" })).toHaveAttribute("href", "/content");
+  });
 });

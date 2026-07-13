@@ -195,7 +195,7 @@ export function ContentForm({
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link className="secondary-button" href={contentId ? `/content/${encodeURIComponent(contentId)}` : "/content"}>
+        <Link className="secondary-button" href="/content">
           <ArrowLeft className="h-4 w-4" /> Cancel
         </Link>
         <button className="primary-button" type="submit" disabled={pending}>
