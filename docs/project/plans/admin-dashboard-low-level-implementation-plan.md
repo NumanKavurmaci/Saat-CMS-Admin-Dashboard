@@ -1,5 +1,9 @@
 # SaatCMS Admin Dashboard Low-Level Implementation Plan
 
+> **Planning record.** This document preserves implementation decisions,
+> acceptance criteria, and phase history. For current setup, usage, and
+> operations, start with the [documentation handbook](../../README.md).
+
 ## 1. Purpose and Status
 
 This document is the implementation-level companion to the
@@ -16,7 +20,7 @@ Precedence when behavior is unclear:
 
 Status as of July 13, 2026:
 
-- Phases 0-5 are implemented locally on the dashboard development branch.
+- Phases 0-5 and visitor access are implemented and merged into `main`.
 - Typecheck, lint, Vitest coverage, production build, and production dependency
   audit are the required local/CI gates.
 - `render.yaml` is implemented, but no external dashboard service is considered
@@ -519,7 +523,7 @@ Behavior:
 
 - Call `GET /api/v1/mw/content/{id}` server-side.
 - Display resolved metadata without rendering a stray playback URL.
-- Preserve safe structured errors and request IDs.
+- Preserve safe structured status, code, and message errors.
 
 ### AD-404 Playback Tester
 
@@ -535,7 +539,7 @@ Behavior:
 - Normalize country to uppercase.
 - Send `X-User-Id`, `X-User-Country`, and `X-Device-Type` server-side.
 - Display playback URL only for successful allowed responses.
-- Preserve input and show safe status/code/message/request ID on failure.
+- Preserve input and show safe status/code/message on failure.
 
 Tests:
 
