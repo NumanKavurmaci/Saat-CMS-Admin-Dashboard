@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: saatcms-admin-dashboard
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "22.13.0"
+      - key: SAATCMS_API_BASE_URL
+        value: https://backend-developer-take-home-assignment.onrender.com
+      - key: CMS_API_KEYS
+        sync: false
+      - key: DASHBOARD_SESSION_SECRET
+        generateValue: true
+      - key: SAATCMS_REQUEST_TIMEOUT_MS
+        value: "30000"
