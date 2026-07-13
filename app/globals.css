@@ -9,7 +9,7 @@
   --border: #22324a;
   --border-strong: #304563;
   --foreground: #f3f7fc;
-  --muted: #91a2b9;
+  --muted: #b6c3d4;
   --primary: #4e8cff;
   --primary-strong: #2d70ee;
   --success: #4ad6a7;
@@ -105,7 +105,16 @@ select:focus-visible {
 }
 
 .field::placeholder {
-  color: #65778f;
+  color: #91a3ba;
+}
+
+/* Keep supporting copy legible against the dashboard's deep navy surfaces. */
+.text-slate-500 {
+  color: #b6c3d4;
+}
+
+.text-slate-600 {
+  color: #91a3ba;
 }
 
 .field:focus {
