@@ -8,7 +8,7 @@ services:
     healthCheckPath: /login
     envVars:
       - key: NODE_VERSION
-        value: "22.13.0"
+        value: "22.15.0"
       - key: SAATCMS_API_BASE_URL
         value: https://backend-developer-take-home-assignment.onrender.com
       - key: CMS_API_KEYS

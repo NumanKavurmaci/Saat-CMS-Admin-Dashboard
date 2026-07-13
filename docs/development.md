@@ -10,7 +10,7 @@ The dashboard is a server-rendered administration client for the separate SaatCM
 
 ```text
 Browser
-  -> SaatCMS Admin Dashboard (Next.js/Vinext)
+  -> SaatCMS Admin Dashboard (Next.js)
        -> signed HttpOnly dashboard session
        -> server-only API client
             -> SaatCMS backend
@@ -25,7 +25,7 @@ The project uses:
 - Tailwind CSS for the interface
 - Server Components and Server Actions for data access and mutations
 - Vitest, React Testing Library, and V8 coverage
-- Vinext as the development and production runtime
+- Next.js as the development and production runtime
 
 ## Prerequisites
 
@@ -140,7 +140,6 @@ lib/
   session.ts                     Signed account/visitor sessions and guards
   types.ts                       Shared backend response types
 test/                            Cross-cutting test setup and library tests
-worker/                          Vinext worker entry point
 ```
 
 Parenthesized App Router groups organize access control without appearing in the URL. The `(dashboard)` layout requires any valid dashboard session. Its nested `(cms)` layout requires an editor/admin account, which means visitor restrictions are enforced on the server before a CMS page renders.
@@ -196,7 +195,7 @@ Keep changes small enough to review but large enough to represent one coherent b
 
 | Command                 | What it does                                            |
 | ----------------------- | ------------------------------------------------------- |
-| `npm run dev`           | Starts the local Vinext development server.             |
+| `npm run dev`           | Starts the local Next.js development server.             |
 | `npm run build`         | Produces the production bundle.                         |
 | `npm run start`         | Runs the built production bundle. Build first.          |
 | `npm test`              | Runs the Vitest suite once.                             |

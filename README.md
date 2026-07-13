@@ -67,7 +67,7 @@ The complete route and access matrix is in the
 - Next.js App Router, React, and strict TypeScript
 - Tailwind CSS
 - Server Components and Server Actions
-- Vinext/Vite production runtime
+- Next.js Node.js production runtime
 - Vitest and React Testing Library
 - Zod for server environment validation
 

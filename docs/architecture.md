@@ -22,7 +22,7 @@ The application supports two experiences:
 
 ```mermaid
 flowchart LR
-    B["Browser<br/>React UI"] -->|"HTML, RSC navigation,<br/>Server Action forms"| D["Dashboard server<br/>Next App Router on Vinext"]
+    B["Browser<br/>React UI"] -->|"HTML, RSC navigation,<br/>Server Action forms"| D["Dashboard server<br/>Next.js App Router"]
     D -->|"public request<br/>no Authorization"| P["SaatCMS public endpoints"]
     D -->|"CMS request<br/>server-added bearer"| C["SaatCMS CMS endpoints"]
     P --> S["SaatCMS services and data"]
@@ -35,11 +35,10 @@ an upstream CMS bearer header and cannot choose an arbitrary backend URL.
 
 ## Runtime and rendering model
 
-The source uses the Next.js App Router and React 19. The project is built and
-served through Vinext, with Vite providing the build pipeline. The Vite setup
-registers Vinext plus Cloudflare RSC/SSR environments and the worker entry in
-[`vite.config.ts`](../vite.config.ts). Render runs the production process with
-`vinext start`, as declared in [`render.yaml`](../render.yaml).
+The source uses the Next.js App Router and React 19. Next.js provides the
+development server, production build, React Server Component pipeline, and
+Node.js production server. Render runs `next start` through the repository's
+`npm run start` script, as declared in [`render.yaml`](../render.yaml).
 
 | Layer             | Responsibility                                                                          | Typical files                                                                                                                        |
 | ----------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |

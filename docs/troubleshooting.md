@@ -300,11 +300,11 @@ This separates dashboard process failures from backend availability, authenticat
 
 ### Production build succeeds but `npm run start` does not
 
-**Symptom:** Vinext cannot find the production output or starts with stale files.
+**Symptom:** Next.js cannot find the production output or starts with stale files.
 
 **Likely cause:** `npm run build` was not run in the current worktree, or generated output belongs to an older dependency/configuration state.
 
-**Fix:** Stop the server, run `npm run build`, then `npm run start`. If generated state is demonstrably stale, remove only this repository's `dist`, `.vinext`, `.next` (if present), and `.wrangler` output directories before rebuilding; verify the working directory first.
+**Fix:** Stop the server, run `npm run build`, then `npm run start`. If generated state is demonstrably stale, remove only this repository's `.next` output directory before rebuilding; verify the working directory first.
 
 ## Render deployment
 

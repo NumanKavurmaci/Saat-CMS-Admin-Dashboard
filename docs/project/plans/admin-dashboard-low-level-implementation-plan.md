@@ -28,8 +28,8 @@ Status as of July 13, 2026:
 
 ## 2. Locked Decisions
 
-- Stack: Next.js App Router, React, strict TypeScript, Tailwind CSS, Vinext,
-  Vitest, and React Testing Library.
+- Stack: Next.js App Router, React, strict TypeScript, Tailwind CSS, Vitest,
+  and React Testing Library.
 - Source layout: root-level `app/`, `components/`, `lib/`, and `test/`; there is
   no `src/` directory.
 - UI primitives: small local components plus Lucide icons; shadcn/ui is not a
@@ -243,17 +243,16 @@ Navigation order:
 Files:
 
 - `package.json`, `package-lock.json`
-- `tsconfig.json`, `next.config.ts`, `vite.config.ts`, `vitest.config.ts`
+- `tsconfig.json`, `next.config.ts`, `vitest.config.ts`
 - `postcss.config.mjs`, `eslint.config.mjs`
-- `worker/index.ts`
 - `.gitignore`, `.gitattributes`
 
 Implemented acceptance criteria:
 
-- Node.js `>=22.13.0` is declared.
+- Node.js `>=22.15.0` is declared.
 - `dev`, `build`, `start`, `lint`, `typecheck`, `test`, `test:watch`, and
   `test:coverage` scripts exist.
-- Strict TypeScript, Tailwind, ESLint, Vitest, and Vinext are configured.
+- Strict TypeScript, Tailwind, ESLint, Vitest, and Next.js are configured.
 - Real environment files and generated outputs are ignored.
 
 ### AD-002 Application shell

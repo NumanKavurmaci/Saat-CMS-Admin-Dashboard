@@ -253,7 +253,6 @@ components/
 lib/
   content/
 test/
-worker/
 ```
 
 The implementation uses root-level folders rather than a `src/` directory.
